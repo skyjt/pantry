@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.2，**基线已定**（决议见第 11 节）；心跳/重试等时延参数实现期按实测微调 |
+| 状态 | v0.14，P1 协议基线已落地；心跳/重试等时延参数实现期按实测微调 |
 | 日期 | 2026-06-10 |
 | 关系 | 本文是**线上协议的唯一事实来源**；功能取舍依据 [requirements.md](requirements.md)（决议 #5：借鉴 ipmsg/iptux 机制、报文自有、不互通、不加密） |
 
@@ -134,6 +134,7 @@ sequenceDiagram
   "text": "你好",         // kind=text/group-text；UTF-8，UDP 装不下走 TCP
   "groupId": "uuid",     // 仅 group-text
   "groupRev": 4,         // 仅 group-text，群元数据版本（见 §7.4）
+  "mentions": ["nodeA"], // 仅 group-text 可选：被 @ 的成员 nodeId 列表
   "targetId": "uuid",    // 仅 recall：要撤回的原消息 id
   "fileRef": { },        // image/sticker：{transferId, name, size, sha256}
   "resend": true         // 补发标记（可选）；ts 保持原值
@@ -142,6 +143,7 @@ sequenceDiagram
 
 - 文本 ≤ **800 字节**走 UDP，超过经 TCP 控制帧发送（同信封）。
 - 撤回：自己的文本 / 群文本消息在 **2 分钟内**可发 `msg(kind:"recall", targetId)`；群聊撤回额外携带 `groupId` / `groupRev`。收端仅接受"撤回者 = 原消息发送者"且会话匹配的指令，随后本地隐藏原消息并插入系统提示行（如"对方撤回了一条消息"）。撤回指令与普通消息一样走 ACK / 重传 / 离线补发；若与原消息乱序到达，收端短暂挂起撤回，待原消息入库后应用。图片/文件/表情由 `file-ctl` 生成本地消息，两端消息 id 暂不一致，撤回留后续扩展。
+- 群内 @：`group-text.mentions` 为可选 nodeId 数组，最多 50 个；收端若包含本机 nodeId，则会话列表本地标记"有人@我"，打开会话后清除。`mentions` 只影响提醒，不影响投递范围；投递仍按群成员列表逐个单播。
 - 图片消息：线上即一次 `file-ctl` 传输，offer 携带 `purpose:"image"` 标记（单文件且 ≤20MB），收端**免确认**自动拉取进图片缓存，两端本地各自生成 `kind:"image"` 的消息记录；超限或多文件退化为普通文件流程（决议 #2）。不另发 msg 报文——单一事实源，避免双报文乱序协调。
 - 表情包消息（`kind:"sticker"`）：复用图片通道且**一律免确认**——发送端收藏入库时已压缩（静图 ≤512px WebP / GIF ≤2MB，见 ui-design.md §5），体积天然受控；收端进表情缓存，气泡内固定小尺寸渲染（需求 F-MSG-7）。
 
@@ -200,7 +202,7 @@ sequenceDiagram
 ```
 
 - **offer**（UDP，≤1200B 装不下时拆多条同 transferId）：`files[]: {fileId, path, size, isDir}`，`path` 为相对路径（文件夹传输即展平的相对路径树，含空目录条目）。
-- **TCP 帧格式**：4 字节大端长度前缀 + UTF-8 JSON 控制帧；`pull-ok` 后紧跟声明长度的裸字节流（零拷贝直传，不做 base64）。帧型：`pull` / `pull-ok` / `done`（带整文件 SHA-256）/ `finish`（接收方全部拉完，发送方据此判定完成）/ `err`（拒绝原因，如未授权 `not-found`、并发 `busy`）。同一连接内文件串行拉取。
+- **TCP 帧格式**：4 字节大端长度前缀 + UTF-8 JSON 控制帧；`pull-ok` 后紧跟声明长度的裸字节流（零拷贝直传，不做 base64）。帧型：`msg`（承载超长消息/大控制信封）/ `msg-ack` / `pull` / `pull-ok` / `done`（带整文件 SHA-256）/ `finish`（接收方全部拉完，发送方据此判定完成）/ `err`（拒绝原因，如未授权 `not-found`、并发 `busy`）。同一连接内文件串行拉取；`msg` 帧独立短连接发送。
 - **校验**：发送方流式计算 SHA-256，`done` 帧携带；接收方边收边算比对，不一致则丢弃 `.part` 重拉。
 - **续传**（P1）：保留 `.part` 与已收字节数，重连后 `pull{offset}` 续传，`done` 校验整文件。
 - **取消**：任一方 `file-ctl{op:cancel}`（UDP）或直接断开 TCP；接收方清理 `.part`。
@@ -215,6 +217,7 @@ sequenceDiagram
 | UDP_PORT / TCP_PORT | 17878 / 17879 | 决议 #6，已拍板 |
 | UDP_MAX_PAYLOAD | 1200 B | 防 IP 分片 |
 | TEXT_UDP_LIMIT | 800 B | 超过走 TCP |
+| TEXT_TCP_LIMIT | 4096 B | 文本输入硬上限 |
 | ACK_RETRY | 1s / 2s / 4s ×3 | 之后入补发队列 |
 | ENTRY_REPLY_JITTER | 0–2s，按在线规模自适应扩至 0–8s | 防应答风暴（含批量开机，§6.1） |
 | PRESENCE_INTERVAL / OFFLINE_AFTER | 30s / 90s | 决议 #1，实测可调 |
@@ -267,3 +270,5 @@ sequenceDiagram
 - 2026-06-11 v0.11 表情包落地：offer 的 `purpose` 增加 `'sticker'`（传输行为同 image：单文件免确认进图片缓存），收端据此生成 `kind:"sticker"` 的本地消息（固定小尺寸渲染）。
 - 2026-06-11 v0.10 讨论组落地：`group-text` 载荷 = `{kind, text, groupId, groupRev}`，**信封 id 跨成员复用**（同一逻辑消息一个 id，收端按 id 去重天然防重复）；发送端等待表与补发队列按 **(消息 id, 收件人)** 复合键管理；`group` 报文两个 op——`info`（全量元数据，LWW 按 (rev, updatedTs) 取大）与 `need`（向发送者索要元数据）；群元数据投递走可靠通道且**离线入队**（成员回来即知道自己进了群）。
 - 2026-06-11 v0.12 文本消息撤回落地：`msg.kind` 增加 `recall`，载荷携带 `targetId`，群聊撤回同时携带 `groupId/groupRev`；撤回窗口 2 分钟，可靠投递与离线补发复用 §7.2，收端校验原发送者后隐藏原消息并插系统提示行。图片/文件/表情撤回留待 file-ctl 具备跨端一致消息 id 后扩展。
+- 2026-06-11 v0.13 群内 @ 落地：`group-text` 可选 `mentions: nodeId[]`；收端仅用于本地加强提醒与会话列表标记，不改变投递范围。
+- 2026-06-11 v0.14 超长文本 TCP 落地：TCP 控制帧增加 `msg/msg-ack`，承载超过 UDP 单包上限的可靠信封；短消息仍走 UDP ACK，文本硬上限 4096B。
