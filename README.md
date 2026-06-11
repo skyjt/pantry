@@ -129,6 +129,8 @@ electron_builder_binaries_mirror=https://npmmirror.com/mirrors/electron-builder-
 
 ```bash
 npm run dev          # 本地开发（热重载）
+npm run dev:2        # 本机联调：一次性启动客户端 1 + 2
+npm run dev:3        # 本机联调：一次性启动客户端 1 + 2 + 3
 npm run dev:client1  # 本机联调客户端 1（/tmp/pantry-dev1，UDP/TCP 17878/17879）
 npm run dev:client2  # 本机联调客户端 2（/tmp/pantry-dev2，UDP/TCP 27878/27879）
 npm run dev:client3  # 本机联调客户端 3（/tmp/pantry-dev3，UDP/TCP 37878/37879）
@@ -147,6 +149,10 @@ npm run dist:mac     # dmg + zip（当前 macOS 架构；正式 universal 包后
 本机多客户端联调（验证发现/消息/文件链路，不需要多台机器）：
 
 ```bash
+# 懒人入口：一个终端里直接拉起多个客户端，Ctrl+C 结束。
+npm run dev:2
+npm run dev:3
+
 # 三个终端分别执行；每个客户端都有独立身份、独立数据目录、错开的 UDP/TCP 端口。
 npm run dev:client1
 npm run dev:client2
