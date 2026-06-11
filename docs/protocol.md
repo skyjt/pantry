@@ -130,16 +130,18 @@ sequenceDiagram
 
 ```jsonc
 {
-  "kind": "text",        // text | image | sticker | group-text | recall(远期)
+  "kind": "text",        // text | image | sticker | group-text | recall
   "text": "你好",         // kind=text/group-text；UTF-8，UDP 装不下走 TCP
   "groupId": "uuid",     // 仅 group-text
   "groupRev": 4,         // 仅 group-text，群元数据版本（见 §7.4）
+  "targetId": "uuid",    // 仅 recall：要撤回的原消息 id
   "fileRef": { },        // image/sticker：{transferId, name, size, sha256}
   "resend": true         // 补发标记（可选）；ts 保持原值
 }
 ```
 
 - 文本 ≤ **800 字节**走 UDP，超过经 TCP 控制帧发送（同信封）。
+- 撤回：自己的文本 / 群文本消息在 **2 分钟内**可发 `msg(kind:"recall", targetId)`；群聊撤回额外携带 `groupId` / `groupRev`。收端仅接受"撤回者 = 原消息发送者"且会话匹配的指令，随后本地隐藏原消息并插入系统提示行（如"对方撤回了一条消息"）。撤回指令与普通消息一样走 ACK / 重传 / 离线补发；若与原消息乱序到达，收端短暂挂起撤回，待原消息入库后应用。图片/文件/表情由 `file-ctl` 生成本地消息，两端消息 id 暂不一致，撤回留后续扩展。
 - 图片消息：线上即一次 `file-ctl` 传输，offer 携带 `purpose:"image"` 标记（单文件且 ≤20MB），收端**免确认**自动拉取进图片缓存，两端本地各自生成 `kind:"image"` 的消息记录；超限或多文件退化为普通文件流程（决议 #2）。不另发 msg 报文——单一事实源，避免双报文乱序协调。
 - 表情包消息（`kind:"sticker"`）：复用图片通道且**一律免确认**——发送端收藏入库时已压缩（静图 ≤512px WebP / GIF ≤2MB，见 ui-design.md §5），体积天然受控；收端进表情缓存，气泡内固定小尺寸渲染（需求 F-MSG-7）。
 
@@ -220,6 +222,7 @@ sequenceDiagram
 | SCAN_RATE | ≤ 128 地址/s | 手动触发 |
 | PEER_CACHE_TTL | 7 天 | 启动单播探测范围 |
 | DEDUP_TTL | 24 h | 已收 id 去重窗口 |
+| RECALL_WINDOW | 2 min | 自己文本消息可撤回窗口 |
 | IMG_AUTO_ACCEPT | ≤ 20 MB | 决议 #2，用户指定 |
 | GROUP_MAX_MEMBERS | 50 | |
 | TRANSFER_CONCURRENCY | 3（可配） | |
@@ -263,3 +266,4 @@ sequenceDiagram
 - 2026-06-11 v0.9 gossip 落地修订：弃用"alive 搭车"（alive 保持轻量，1200B 限制下易超），改为**结识即交换 + 5 分钟周期兜底**；`peers` 条目校验入 codec；节点缓存启动探测（§6.3 末条）同步实现。
 - 2026-06-11 v0.11 表情包落地：offer 的 `purpose` 增加 `'sticker'`（传输行为同 image：单文件免确认进图片缓存），收端据此生成 `kind:"sticker"` 的本地消息（固定小尺寸渲染）。
 - 2026-06-11 v0.10 讨论组落地：`group-text` 载荷 = `{kind, text, groupId, groupRev}`，**信封 id 跨成员复用**（同一逻辑消息一个 id，收端按 id 去重天然防重复）；发送端等待表与补发队列按 **(消息 id, 收件人)** 复合键管理；`group` 报文两个 op——`info`（全量元数据，LWW 按 (rev, updatedTs) 取大）与 `need`（向发送者索要元数据）；群元数据投递走可靠通道且**离线入队**（成员回来即知道自己进了群）。
+- 2026-06-11 v0.12 文本消息撤回落地：`msg.kind` 增加 `recall`，载荷携带 `targetId`，群聊撤回同时携带 `groupId/groupRev`；撤回窗口 2 分钟，可靠投递与离线补发复用 §7.2，收端校验原发送者后隐藏原消息并插系统提示行。图片/文件/表情撤回留待 file-ctl 具备跨端一致消息 id 后扩展。

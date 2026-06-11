@@ -1,19 +1,19 @@
 # 茶话间（Pantry）开发交接文档
 
 > 给接手本项目的任何 AI 代理或开发者。读完本文 + [AGENTS.md](../AGENTS.md) 即可无缝继续开发。
-> 最后更新：2026-06-11（v0.3 里程碑收官后）。**本文描述"当前状态与下一步"，会过期——以 `git log` 与各文档变更记录为准。**
+> 最后更新：2026-06-11（v0.4.0 首个可交付预览版收尾）。**本文描述"当前状态与下一步"，会过期——以 `git log` 与各文档变更记录为准。**
 
 ## 0. 必读顺序（15 分钟上手）
 
 1. **[AGENTS.md](../AGENTS.md)** —— 9 条硬性红线（Electron 22.3.27 焊死、纯内网、分层铁律等），违反即错误；
 2. 本文 —— 状态、工作流、下一步；
 3. 设计四件套（按需细读）：[requirements.md](requirements.md)（功能与 22 项决议）→ [protocol.md](protocol.md)（线上协议 v0.11）→ [ui-design.md](ui-design.md)（界面）→ [tech-design.md](tech-design.md)（选型/分层/库表）；
-4. `git log --oneline` —— 19 个提交就是完整开发史，每条 commit message 都是一份增量说明。
+4. `git log --oneline` —— 提交历史就是完整开发史，每条 commit message 都是一份增量说明。
 
 ## 1. 项目状态一览
 
 纯内网、无服务器、基于 IP 的局域网 IM + 文件传输（Electron 22 / Vue 3 / better-sqlite3）。
-**v0.1、v0.2、v0.3 三个里程碑已完成**（对照 tech-design §12）：
+**v0.1、v0.2、v0.3 三个里程碑已完成，v0.4 已完成消息撤回并补齐本地打包脚本**（对照 tech-design §12）：
 
 | 已交付 | 说明 |
 |---|---|
@@ -23,6 +23,8 @@
 | 文件 | TCP 拉取式流传输、SHA-256 流式校验、文件夹递归、重名避让、路径穿越防护 |
 | 图片/表情 | offer purpose=image/sticker，≤20MB 免确认；截图粘贴/拖图；右键收藏（canvas 压缩 512px WebP）|
 | 内置截图 | 全局快捷键 Ctrl/Cmd+Alt+A、框选窗、剪贴板+直发会话、截图隐藏主窗（可配）|
+| 撤回 | 自己文本/群文本消息 2 分钟内可撤；`msg.kind:"recall"` 可靠投递 + 离线补发；本地/对端隐藏原消息并插系统提示 |
+| 打包链条 | `electron-builder@24.13.3` 精确锁；`dist:win`/`dist:linux`/`dist:mac` 本地脚本；Windows/Debian 真实打包测试留给目标平台 |
 | UI | 三栏主窗、三级通讯录树（公司▸部门▸团队）、资料卡+本地备注、全局搜索（FTS 按字）、历史滚动加载、设置独立小窗、首启向导、托盘+通知直达会话 |
 | 存储 | SQLite WAL，迁移 v5（user_version 机制，**只追加永不改旧迁移**）|
 
@@ -62,12 +64,12 @@ renderer/  main.ts 哈希三入口(App/#settings/#capture)；stores(pinia=主进
 
 ## 4. 下一步：v0.4（按此顺序做）
 
-1. **消息撤回**（F-MSG-6）：自己的消息 2 分钟内可撤；协议建议新增 `msg.kind:"recall"`（payload 带 `targetId`）或独立 type——**先改 protocol.md 留痕**；对端删除消息行+插系统提示行；离线对端随补发送达；UI 右键菜单已有占位（ChatPane 注释 P1）。
+1. **消息撤回**（F-MSG-6）——已完成文本/群文本范围：协议 `msg.kind:"recall"` + `targetId`，群聊携带 `groupId/groupRev`；2 分钟窗口；可靠投递与离线补发；原消息置 `recalled` 并清 FTS；UI 右键撤回 + 系统提示。图片/文件/表情撤回留待 `file-ctl` 有跨端一致消息 id 后扩展。
 2. **断点续传**（F-FILE-4）：数据面已预留——`pull` 帧带 `offset`、发送端支持任意 offset、`done` 是整文件哈希；要做的是接收端保留 `.part`+已收字节数（transfers 表加列→迁移 v6）、失败后重连续拉、UI 加"继续"按钮。
 3. **聊天导出/导入**（决议 #19）：`services/porter.ts`；阅读格式 HTML/TXT + 迁移备份包 `.pantry-bak`（zip 容器：manifest/messages.jsonl/media）。**zip 选型未定**：Node 16 无内置 zip，建议纯 JS 的 `yazl`+`yauzl`（engines 兼容，需精确锁版本过五连）或自写 store-only zip；导入身份映射规则见 tech-design §8。
 4. **深色主题**：tokens.css 变量化已就绪，加一套暗色表+设置开关（config 持久化）。
 
-之后 **v1.0**：electron-builder 配置（`electronVersion: 22.3.27`、`asarUnpack` better-sqlite3、win x64 NSIS+便携/deb+AppImage/dmg+zip universal）、GitHub Actions（**linux 必须 debian:10 容器**编译 native）、三平台冒烟清单、**Win7 VM 专项**（twemoji 图片渲染落地、软渲染验证、SHA-2 KB 提示文案）、LICENSE 定稿（暂定 MIT，需用户确认）。
+之后 **v1.0**：目标平台真实打包与冒烟（Win7 x64 VM / Debian 10）、GitHub Actions（**linux 必须 debian:10 容器**编译 native）、macOS universal 包专项、**Win7 VM 专项**（twemoji 图片渲染落地、软渲染验证、SHA-2 KB 提示文案）、LICENSE 定稿（暂定 MIT，需用户确认）。
 
 ## 5. 已知遗留 / TODO（非阻塞）
 
@@ -86,3 +88,4 @@ renderer/  main.ts 哈希三入口(App/#settings/#capture)；stores(pinia=主进
 - `.npmrc` 三件套**都是故意的，不要"修"**：`legacy-peer-deps`（@types/node 锁 16）、`runtime=electron`+`target`（native 模块面向 Electron ABI 编译，开发机 Node 太新会编不过 9.x 源码）。
 - 网络相关测试必须 `bindAddress: '127.0.0.1'` + `broadcastTargets: []`——**绝不向真实局域网发包**。
 - 数据库迁移只追加（migrations.ts 数组 push 新项）；建新表前检查是否已存在于早期迁移（groups/stickers/transfers 都吃过"漏建表"的亏，db-selftest 会抓）。
+- `npm audit` 会报 Electron 22 EOL、builder/rebuild/tar、Vite/Vitest 本地开发服务器类 advisories；**不要跑 `npm audit fix --force`**，它会升级 Electron / builder / 测试工具大版本并破坏 Win7 基线。运行时缓解仍按 README「安全性」：只加载本地资源、严格隔离、无外网、入站白名单校验。
