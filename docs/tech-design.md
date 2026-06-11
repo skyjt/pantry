@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| 状态 | v0.5，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
+| 状态 | v0.6，P1 本地交付候选；目标平台真实打包测试待 Windows / Debian 执行 |
 | 日期 | 2026-06-10 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
@@ -14,7 +14,7 @@
 | 构建 | **electron-vite**（Vite 5） | 一份配置管三端产物；renderer 目标 `chrome108`、main/preload 目标 `node16`，红线在构建层强制 |
 | 渲染框架 | **Vue 3 + Pinia** | 组件模型贴合三栏布局；生态对中文社区友好；Chrome 108 完全兼容 |
 | 样式 | **原生 CSS + CSS 变量**（ui-design §9 token 直接映射），Vue SFC scoped；不引组件库/Tailwind | 视觉自绘才能做出"微信感"；避免组件库默认样式拉低质感 |
-| 图标 | **lucide** 按需内联 SVG | 线性 1.5px 风格与 UI 文档一致；内联无字体兼容问题 |
+| 图标 | **项目内自绘线性 SVG** | 线性 1.6px 风格与 UI 文档一致；不依赖 emoji/system 字形，不引入组件库或图标依赖 |
 | 数据库 | **better-sqlite3 锁定 9.6.0**（同步 API + WAL + FTS5） | 主进程单线程同步访问最简单可靠；已对 Electron 22 ABI=110 实测编译+运行通过。`.npmrc` 以 `runtime=electron` 让 native 构建始终面向 Electron 而非开发机 Node（开发机 Node 太新会编不过老版本源码） |
 | 图片处理 | **渲染进程 canvas**（缩略图、表情包压缩 WebP） | Chromium 108 原生支持 `toBlob('image/webp')`；**不引 sharp** 等 native 库，避开老 glibc 等编译雷区 |
 | 日志 | 自写轻量 logger（分级、按天分文件、保留 7 天、可打包导出） | 几十行的事，不引依赖 |
@@ -128,7 +128,8 @@ messages(id TEXT PK,                            -- 协议 msgId，全局唯一
       ts INT, seq INT,                          -- seq: 本地单调递增，时钟漂移兜底排序
       status TEXT)                              -- sending|sent|queued|failed|recalled
 messages_fts(fts5: msg_id UNINDEXED, text)      -- 入库时中文按字空格预切；查询 phrase 匹配
-groups(group_id TEXT PK, name, members TEXT, rev INT, updated_by, updated_ts INT)
+groups(group_id TEXT PK, name, members TEXT, rev INT, updated_by, updated_ts INT,
+      creator_ip TEXT, admin_secret_hash TEXT)
 transfers(transfer_id TEXT PK, msg_id, peer_id, direction, files TEXT,
       status, bytes_done INT, total INT, ts INT)
 send_queue(msg_id TEXT PK, peer_id, envelope TEXT, created INT, attempts INT)
@@ -138,6 +139,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 
 - 索引：`messages(conv_id, ts, seq)`、`peers(last_seen)`、`send_queue(peer_id)`、`transfers(status)`。
 - `remark` 为本地备注名（决议 #22）：仅本机、不入协议；显示与搜索优先命中备注。
+- `groups.creator_ip/admin_secret_hash` 为讨论组管理门槛（决议 #27）：密码明文不入库；无密码组以创建 IP 作为管理来源限制。该机制服务于内网协作秩序，不替代加密/签名。
 - 中文搜索：FTS5 不会切中文词 → **入库时把 `text` 按字拆开以空格连接**写入 fts 表，查询同样按字拆 + `"…"` 短语匹配；文件名/联系人走 `LIKE %…%`（千级数据量足够）。
 - 定时清理（启动 + 每小时）：`dedup` 超 24h、`send_queue` 超 7 天或单 peer 超 200 条（裁剪时回推 UI 标失败）；启动时将残留 `sending` 态消息复位为失败（可点重发），杜绝"永远转圈"。
 - 迁移：`PRAGMA user_version` 递增 + 顺序执行迁移脚本；导入/迁移目录前自动备份 db 文件。
@@ -159,7 +161,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 ## 7. 渲染进程要点
 
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
-- **emoji 的 Win7 彩色方案**（关键坑）：Win7 系统 emoji 是黑白残缺的 → 面板 emoji 与消息内 emoji 统一用**打包的 twemoji WebP 子集（约 300 个常用，总 ~1MB）渲染**；消息明文仍是 Unicode 字符（协议/导出不受影响），仅展示层替换为 `<img>`。三平台观感一致。注意 twemoji 图像为 **CC-BY 4.0**，须在"关于-开源许可"中署名（决议 #22）。
+- **系统图标自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色，避免系统 emoji 字形在 Win7/不同平台上变成五颜六色或缺字。emoji 面板与消息正文里的 emoji 仍是用户内容；Win7 彩色 emoji 子集图片替换留待 Win7 冒烟时做。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。
 - token 全部走 `styles/tokens.css` CSS 变量（深色主题 v0.4 只换变量表）。
@@ -186,7 +188,7 @@ media/stickers/...  # 自定义表情包媒体
 
 | 风险 | 对策 |
 |---|---|
-| Win7 emoji 黑白/缺字 | twemoji 子集图片渲染（§7），不依赖系统字体 |
+| Win7 emoji / 系统图标字形不一致 | 系统图标全部自绘 SVG；消息 emoji 后续可用 twemoji 子集图片渲染（§7） |
 | Debian 10 glibc 2.28 vs CI 编译环境 | linux 侧 better-sqlite3 在 **debian:10 容器**内编译（apt 指向 archive 源）；产物在真 Debian 10 冒烟 |
 | linux arm64 交叉编译 native 模块 | docker buildx + qemu；若拖累节奏，v1 先发 x64，arm64 列 P2 产物（README 平台表加注） |
 | macOS 26 跑 Chromium 108 | 已知风险项（README FAQ）：输入法、通知权限、屏幕录制授权列入发布冒烟清单 |
@@ -235,3 +237,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-11 v0.7 文本消息撤回落地：IPC 增加 `msg:recall`；本地消息 kind 增加 `system` 用于撤回提示；原消息置 `status='recalled'` 并清理 FTS 索引。
 - 2026-06-11 v0.8 首个可交付预览版打包链条：精确锁 `electron-builder@24.13.3`，新增 `dist:win` / `dist:linux` / `dist:mac`，配置 `electronVersion: 22.3.27` 与 better-sqlite3 asarUnpack；Windows/Debian 真实打包测试放到目标平台执行。
 - 2026-06-11 v0.9 P1 本地交付候选：`services/porter.ts` 落地迁移备份包（消息/联系人/群/传输/表情/媒体）、`shared/ipc.ts` 补转发/会话操作/导出范围/端口设置契约；`TransferServer` 支持 TCP 长文本控制帧；数据库自测覆盖 porter 媒体恢复。
+- 2026-06-11 v0.10 图标与群管理权限：图标方案改为项目内自绘 SVG；groups 表迁移 v7 增加 `creator_ip/admin_secret_hash`，服务层按创建 IP 或管理密码摘要限制改名/增删成员，退组保持免管理权限。
