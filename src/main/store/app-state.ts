@@ -30,6 +30,8 @@ export interface ConfigFile {
   manualPeers: string[]
   /** 网段扫描 CIDR 列表（F-DISC-2 第二板斧） */
   scanRanges: string[]
+  /** 截图时隐藏茶话间窗口（决议 #22，默认开） */
+  hideOnCapture: boolean
 }
 
 function readJson<T>(path: string): T | null {
@@ -92,11 +94,12 @@ export function saveProfile(state: AppState, patch: ProfilePatch): void {
 /** 保存应用级设置（通知开关 / 手动节点 / 扫描网段），与资料保存互不影响 */
 export function saveAppSettings(
   state: AppState,
-  patch: Partial<Pick<ConfigFile, 'notifications' | 'manualPeers' | 'scanRanges'>>
+  patch: Partial<Pick<ConfigFile, 'notifications' | 'manualPeers' | 'scanRanges' | 'hideOnCapture'>>
 ): void {
   if (patch.notifications !== undefined) state.config.notifications = patch.notifications
   if (patch.manualPeers !== undefined) state.config.manualPeers = patch.manualPeers
   if (patch.scanRanges !== undefined) state.config.scanRanges = patch.scanRanges
+  if (patch.hideOnCapture !== undefined) state.config.hideOnCapture = patch.hideOnCapture
   atomicWriteJson(state.configPath, state.config)
 }
 
@@ -129,7 +132,8 @@ export function loadAppState(dataDir: string, appVersion: string, tcpPort = DEFA
       fileDir: '',
       notifications: true,
       manualPeers: [],
-      scanRanges: []
+      scanRanges: [],
+      hideOnCapture: true
     }
     atomicWriteJson(configPath, config)
   }
@@ -143,6 +147,7 @@ export function loadAppState(dataDir: string, appVersion: string, tcpPort = DEFA
   config.scanRanges = Array.isArray(config.scanRanges)
     ? config.scanRanges.filter((s): s is string => typeof s === 'string')
     : []
+  config.hideOnCapture = config.hideOnCapture !== false
 
   const profile: Profile = {
     nodeId: identity.nodeId,

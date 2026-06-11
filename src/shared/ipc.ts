@@ -39,7 +39,14 @@ export const IpcChannels = {
   groupLeave: 'group:leave',
   groupGet: 'group:get',
   groupList: 'group:list',
-  groupSend: 'group:send'
+  groupSend: 'group:send',
+  captureStart: 'capture:start',
+  captureDone: 'capture:done',
+  stickerFetchSource: 'sticker:fetch-source',
+  stickerAdd: 'sticker:add',
+  stickerList: 'sticker:list',
+  stickerRemove: 'sticker:remove',
+  stickerSend: 'sticker:send'
 } as const
 
 /** main → renderer 的事件推送 */
@@ -51,6 +58,10 @@ export const IpcEvents = {
   convsUpdated: 'convs:updated',
   transferUpdated: 'transfer:updated',
   groupUpdated: 'group:updated',
+  /** 截图框选窗初始化（dataURL + 缩放系数） */
+  captureInit: 'capture:init',
+  /** 截图完成且选择"发送"→ 主窗（发到当前会话） */
+  captured: 'ui:captured',
   /** 点击系统通知/托盘 → 主窗定位到会话 */
   openConv: 'ui:open-conv'
 } as const
@@ -115,7 +126,7 @@ export interface MessageView {
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text' | 'file' | 'image'
+  kind: 'text' | 'file' | 'image' | 'sticker'
   text: string
   fileRef?: FileRefView
   ts: number
@@ -201,12 +212,22 @@ export interface SettingsView {
   scanRanges: string[]
   udpPort: number
   tcpPort: number
+  /** 截图时隐藏茶话间窗口（决议 #22） */
+  hideOnCapture: boolean
 }
 
 export interface AppSettingsPatch {
   notifications?: boolean
   manualPeers?: string[]
   scanRanges?: string[]
+  hideOnCapture?: boolean
+}
+
+export interface StickerView {
+  id: string
+  w: number
+  h: number
+  animated: boolean
 }
 
 export interface ProfileSubmit {
@@ -277,6 +298,18 @@ export interface PantryApi {
   getGroup(groupId: string): Promise<GroupView | null>
   listGroups(): Promise<GroupView[]>
   sendGroupText(groupId: string, text: string): Promise<MessageView | null>
+  /** 触发截图（等价全局快捷键） */
+  startCapture(): Promise<void>
+  /** 截图框选完成：写剪贴板；send=true 时同时回推主窗发送到当前会话 */
+  captureDone(bytes: ArrayBuffer, send: boolean): Promise<void>
+  /** 读取某次传输的原始字节（收藏表情的压缩流水线用，仅图片/表情类传输可读） */
+  fetchStickerSource(transferId: string): Promise<{ bytes: ArrayBuffer; ext: string } | null>
+  /** 保存收藏（bytes 已经渲染层压缩）；返回新表情 */
+  addSticker(bytes: ArrayBuffer, ext: string, w: number, h: number): Promise<StickerView | null>
+  listStickers(): Promise<StickerView[]>
+  removeSticker(id: string): Promise<void>
+  /** 发送收藏的表情到某节点 */
+  sendSticker(peerNodeId: string, stickerId: string): Promise<MessageView | null>
   /** 订阅通讯录变化；返回退订函数 */
   onPeersUpdated(listener: (peers: PeerView[]) => void): () => void
   onMsgNew(listener: (msg: MessageView) => void): () => void
@@ -284,6 +317,10 @@ export interface PantryApi {
   onConvsUpdated(listener: (convs: ConversationView[]) => void): () => void
   onTransferUpdated(listener: (transfer: TransferView) => void): () => void
   onGroupUpdated(listener: (group: GroupView) => void): () => void
+  /** 截图窗：接收屏幕图像 */
+  onCaptureInit(listener: (dataUrl: string, scaleFactor: number) => void): () => void
+  /** 主窗：截图选择"发送"后的字节流 */
+  onCaptured(listener: (bytes: ArrayBuffer) => void): () => void
   /** 点通知/托盘后主进程要求打开某会话 */
   onOpenConv(listener: (convId: string) => void): () => void
 }

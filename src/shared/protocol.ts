@@ -185,8 +185,8 @@ export interface FileCtlOffer {
   fileCount: number
   /** 展示名：单文件=文件名，文件夹=目录名，多文件=首文件名 */
   rootName: string
-  /** 'image'：单文件 ≤20MB 时收端免确认进图片缓存（protocol §7.1）；缺省按普通文件 */
-  purpose?: 'image'
+  /** image/sticker：单文件 ≤20MB 时收端免确认进图片缓存（§7.1）；缺省按普通文件 */
+  purpose?: 'image' | 'sticker'
 }
 
 export interface FileCtlSimple {

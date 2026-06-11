@@ -50,7 +50,7 @@ interface AssemblingOffer {
   totalSize: number
   fileCount: number
   rootName: string
-  purpose?: 'image'
+  purpose?: 'image' | 'sticker'
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -136,7 +136,7 @@ export class FilesService extends EventEmitter {
   async offerPaths(
     peerId: string,
     paths: string[],
-    wantImage = false
+    want: 'file' | 'image' | 'sticker' = 'file'
   ): Promise<MessageView | null> {
     const peer = this.deps.registry.get(peerId)
     if (!peer || !peer.online || paths.length === 0) return null
@@ -165,8 +165,12 @@ export class FilesService extends EventEmitter {
     if (fileCount === 0 || fileCount > MAX_FILES_PER_TRANSFER) return null
     for (const m of metas) totalSize += m.size
 
-    // 图片用途：单文件且 ≤20MB 才成立，否则退化为普通文件（决议 #2）
-    const asImage = wantImage && !hasDir && fileCount === 1 && totalSize <= IMG_AUTO_ACCEPT
+    // 图片/表情用途：单文件且 ≤20MB 才成立，否则退化为普通文件（决议 #2）
+    const purpose =
+      want !== 'file' && !hasDir && fileCount === 1 && totalSize <= IMG_AUTO_ACCEPT
+        ? want
+        : undefined
+    const asImage = purpose !== undefined
 
     const transferId = randomUUID()
     const rootName =
@@ -186,8 +190,8 @@ export class FilesService extends EventEmitter {
       convId,
       senderId: this.deps.selfId,
       isMine: true,
-      kind: asImage ? 'image' : 'file',
-      content: asImage ? '[图片]' : `[文件] ${rootName}`,
+      kind: purpose ?? 'file',
+      content: purpose === 'sticker' ? '[表情]' : purpose === 'image' ? '[图片]' : `[文件] ${rootName}`,
       fileRef: JSON.stringify(fileRef),
       ts: now,
       status: 'sending'
@@ -232,7 +236,7 @@ export class FilesService extends EventEmitter {
           totalSize,
           fileCount,
           rootName,
-          ...(asImage ? { purpose: 'image' as const } : {})
+          ...(purpose ? { purpose } : {})
         }
         const ok = await this.deps.messenger.sendReliable(
           peerId,
@@ -455,14 +459,17 @@ export class FilesService extends EventEmitter {
     }
     if (plans.filter((p) => !p.isDir).length !== asm.fileCount) return // 分包不一致，丢弃
 
-    // 图片免确认条件复核（不信任发送方标记，大小/单文件条件自己验——决议 #2）
-    const asImage =
-      asm.purpose === 'image' &&
+    // 图片/表情免确认条件复核（不信任发送方标记，大小/单文件条件自己验——决议 #2）
+    const inPurpose =
+      (asm.purpose === 'image' || asm.purpose === 'sticker') &&
       asm.fileCount === 1 &&
       asm.totalSize <= IMG_AUTO_ACCEPT &&
       plans.length === 1 &&
       !plans[0].isDir &&
       !plans[0].relPath.includes('/')
+        ? asm.purpose
+        : undefined
+    const asImage = inPurpose !== undefined
 
     const convId = this.deps.convRepo.ensureSingle(peerId)
     const msgId = randomUUID()
@@ -479,8 +486,9 @@ export class FilesService extends EventEmitter {
       convId,
       senderId: peerId,
       isMine: false,
-      kind: asImage ? 'image' : 'file',
-      content: asImage ? '[图片]' : `[文件] ${asm.rootName}`,
+      kind: inPurpose ?? 'file',
+      content:
+        inPurpose === 'sticker' ? '[表情]' : inPurpose === 'image' ? '[图片]' : `[文件] ${asm.rootName}`,
       fileRef: JSON.stringify(fileRef),
       ts: now,
       status: 'sent'

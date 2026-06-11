@@ -14,6 +14,7 @@ import { QueueRepo } from './queue-repo'
 import { DedupRepo } from './dedup-repo'
 import { TransferRepo } from './transfer-repo'
 import { GroupRepo } from './group-repo'
+import { StickerRepo } from './sticker-repo'
 import { toFtsQuery, toFtsTokens } from './fts'
 import { SearchService } from '../services/search'
 import { PeerRegistry } from '../net/peer-registry'
@@ -49,7 +50,7 @@ try {
   console.log(`[db-selftest] runtime node=${process.versions.node} abi=${process.versions.modules}`)
 
   // 1. 迁移就位
-  assert.equal(db.pragma('user_version', { simple: true }), 4, '迁移版本应为 4')
+  assert.equal(db.pragma('user_version', { simple: true }), 5, '迁移版本应为 5')
   assert.equal(db.pragma('journal_mode', { simple: true }), 'wal', '应为 WAL 模式')
 
   // 2. 联系人 upsert / 载入往返
@@ -273,6 +274,15 @@ try {
   assert.equal(groupRepo.get('g-1')?.name, '新名')
   assert.equal(convRepo.ensureGroup('g-1'), 'group:g-1')
   assert.equal(convRepo.get('group:g-1')?.type, 'group')
+
+  // 11. 表情包
+  const stickerRepo = new StickerRepo(db)
+  stickerRepo.insert('s-1', '/tmp/s-1.webp', 512, 384, false)
+  stickerRepo.insert('s-2', '/tmp/s-2.gif', 200, 200, true)
+  assert.equal(stickerRepo.list().length, 2)
+  assert.equal(stickerRepo.list()[0].id, 's-2', '最新收藏在前')
+  assert.equal(stickerRepo.remove('s-1'), '/tmp/s-1.webp', '删除返回路径供清理文件')
+  assert.equal(stickerRepo.list().length, 1)
 
   console.log('[db-selftest] PASS —— 迁移/联系人/会话消息/队列去重/传输/搜索/中文FTS 全部通过')
 } finally {
