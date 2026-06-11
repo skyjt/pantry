@@ -40,7 +40,8 @@
 ## 每次改动的验证清单（全过才算完成）
 
 ```bash
-npm test            # vitest：编解码 + 回环集成
+npm test            # vitest：编解码 + 回环集成 + 纯函数
+npm run test:db     # 数据库自测：在 Electron 内置 Node（真实 ABI）上跑迁移/repo/FTS
 npm run typecheck   # node16 / chrome108 两套类型基线
 npm run build       # 三端产物
 npm run smoke       # 构建 + 启动 1.5s 干净退出（退出码 0）
