@@ -137,6 +137,7 @@ onUnmounted(() => {
 .shell {
   display: flex;
   height: 100%;
+  min-height: 0;
 }
 
 /* 栏① 导航 */
@@ -251,6 +252,9 @@ onUnmounted(() => {
 /* 栏③ 内容 */
 .content {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   background: var(--bg-chat);
   display: grid;
 }
