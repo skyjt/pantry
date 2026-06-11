@@ -117,6 +117,19 @@ export const MIGRATIONS: ReadonlyArray<string> = [
     updated_by TEXT NOT NULL DEFAULT '',
     updated_ts INTEGER NOT NULL DEFAULT 0
   );
+  `,
+
+  // v5：自定义表情包（F-MSG-7）
+  `
+  CREATE TABLE stickers (
+    id       TEXT PRIMARY KEY,
+    path     TEXT NOT NULL,
+    w        INTEGER NOT NULL DEFAULT 0,
+    h        INTEGER NOT NULL DEFAULT 0,
+    animated INTEGER NOT NULL DEFAULT 0,
+    sort     INTEGER NOT NULL DEFAULT 0,
+    added    INTEGER NOT NULL
+  );
   `
 ]
 

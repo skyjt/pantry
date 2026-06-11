@@ -1,9 +1,17 @@
 <script setup lang="ts">
-// emoji 面板（F-MSG-7 的 P0 部分）：精选常用集，点击插入输入框。
-// 注：Win7 系统 emoji 为黑白残缺，twemoji 图片替换方案（tech-design §7）
-// 留待 Win7 VM 冒烟时落地——展示层替换不影响消息明文与协议。
+import { onMounted, ref } from 'vue'
+import { useStickersStore } from '../stores/stickers'
 
-const emit = defineEmits<{ select: [emoji: string]; close: [] }>()
+// 表情面板双页签（ui-design §5）：emoji / 我的表情包。
+// Win7 的 twemoji 图片替换方案（tech-design §7）留待 Win7 VM 冒烟时落地。
+
+const emit = defineEmits<{ select: [emoji: string]; sticker: [id: string]; close: [] }>()
+const props = defineProps<{ stickerEnabled: boolean }>()
+
+const tab = ref<'emoji' | 'sticker'>('emoji')
+const stickers = useStickersStore()
+
+onMounted(() => void stickers.init())
 
 const EMOJIS: string[] = [
   '😀', '😄', '😁', '😂', '🤣', '😊', '😉', '😍',
@@ -21,7 +29,31 @@ const EMOJIS: string[] = [
 
 <template>
   <div class="panel" @mouseleave="emit('close')">
-    <button v-for="e in EMOJIS" :key="e" class="emo" @click="emit('select', e)">{{ e }}</button>
+    <div class="tabs">
+      <button :class="{ on: tab === 'emoji' }" @click="tab = 'emoji'">😊 表情</button>
+      <button :class="{ on: tab === 'sticker' }" @click="tab = 'sticker'">🖼 表情包</button>
+    </div>
+
+    <div v-if="tab === 'emoji'" class="grid emoji-grid">
+      <button v-for="e in EMOJIS" :key="e" class="emo" @click="emit('select', e)">{{ e }}</button>
+    </div>
+
+    <div v-else class="grid sticker-grid">
+      <div
+        v-for="s in stickers.list"
+        :key="s.id"
+        class="stk"
+        :class="{ disabled: !props.stickerEnabled }"
+        :title="props.stickerEnabled ? '点击发送，右键删除' : '当前会话不可发表情包'"
+        @click="props.stickerEnabled && emit('sticker', s.id)"
+        @contextmenu.prevent="stickers.remove(s.id)"
+      >
+        <img :src="`pantry-sticker://${s.id}`" alt="表情" />
+      </div>
+      <p v-if="stickers.list.length === 0" class="empty">
+        还没有收藏——在聊天图片上右键「添加到表情」
+      </p>
+    </div>
   </div>
 </template>
 
@@ -32,17 +64,42 @@ const EMOJIS: string[] = [
   left: 0;
   margin-bottom: 6px;
   width: 324px;
-  max-height: 220px;
-  overflow-y: auto;
   background: var(--bg-window);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+  z-index: 8;
+}
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+.tabs button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  padding: 8px 0;
+  cursor: pointer;
+  color: var(--text-3);
+}
+.tabs button.on {
+  color: var(--primary);
+  font-weight: 600;
+}
+.grid {
+  max-height: 200px;
+  overflow-y: auto;
   padding: 8px;
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
   gap: 2px;
-  z-index: 8;
+}
+.emoji-grid {
+  grid-template-columns: repeat(8, 1fr);
+}
+.sticker-grid {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
 }
 .emo {
   border: none;
@@ -55,5 +112,32 @@ const EMOJIS: string[] = [
 }
 .emo:hover {
   background: var(--line);
+}
+.stk {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  background: var(--bg-list);
+}
+.stk:hover {
+  outline: 2px solid var(--primary);
+}
+.stk.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.stk img {
+  max-width: 100%;
+  max-height: 100%;
+}
+.empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 20px 8px;
 }
 </style>

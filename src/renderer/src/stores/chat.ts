@@ -49,6 +49,11 @@ export const useChatStore = defineStore('chat', {
       window.pantry.onOpenConv((convId) => {
         void this.openConv(convId)
       })
+      // 截图选择"发送"：发到当前单聊会话（无活跃单聊则只留在剪贴板）
+      window.pantry.onCaptured((bytes) => {
+        const conv = this.activeConv
+        if (conv && conv.type === 'single') void this.sendImageBytes('截图.png', bytes)
+      })
     },
 
     /** 从通讯录或会话列表进入会话 */
@@ -148,6 +153,14 @@ export const useChatStore = defineStore('chat', {
       const conv = this.activeConv
       if (!conv) return false
       const view = await window.pantry.sendImageBytes(conv.peerId, name, bytes)
+      return this.pushOwn(view)
+    },
+
+    /** 发送收藏的表情包（仅单聊，传输与图片同通道） */
+    async sendSticker(stickerId: string): Promise<boolean> {
+      const conv = this.activeConv
+      if (!conv || conv.type === 'group') return false
+      const view = await window.pantry.sendSticker(conv.peerId, stickerId)
       return this.pushOwn(view)
     },
 

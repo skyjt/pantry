@@ -67,6 +67,13 @@ async function toggleNotifications(): Promise<void> {
   })
 }
 
+async function toggleHideOnCapture(): Promise<void> {
+  if (!settings.value) return
+  settings.value = await window.pantry.saveAppSettings({
+    hideOnCapture: !settings.value.hideOnCapture
+  })
+}
+
 async function addPeer(): Promise<void> {
   const addr = newPeer.value.trim()
   if (!addr) return
@@ -145,6 +152,15 @@ async function removeRange(cidr: string): Promise<void> {
             @change="toggleNotifications"
           />
         </label>
+        <label class="row toggle">
+          <span>截图时隐藏窗口</span>
+          <input
+            type="checkbox"
+            :checked="settings?.hideOnCapture"
+            @change="toggleHideOnCapture"
+          />
+        </label>
+        <p class="meta">截图快捷键：Ctrl/Cmd + Alt + A（自定义将在后续版本提供）</p>
         <div class="actions">
           <span class="tip">{{ savedTip }}</span>
           <button class="primary" :disabled="!nick.trim()" @click="saveProfile">保存</button>

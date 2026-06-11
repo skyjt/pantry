@@ -1,6 +1,20 @@
-import { app, BrowserWindow, dialog, ipcMain, Notification, protocol, shell, type Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  desktopCapturer,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  nativeImage,
+  Notification,
+  protocol,
+  screen,
+  shell,
+  type Tray
+} from 'electron'
 import { release } from 'node:os'
-import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
 import {
@@ -17,6 +31,8 @@ import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT, LIMITS } from '../shared/protocol'
 import { loadAppState, saveAppSettings, saveProfile, type AppState } from './store/app-state'
 import { setupTray } from './windows/tray'
 import { openSettingsWindow } from './windows/settings-window'
+import { closeCaptureWindow, openCaptureWindow } from './windows/capture-window'
+import { StickerRepo } from './store/sticker-repo'
 import { parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
 import { GroupRepo } from './store/group-repo'
@@ -76,6 +92,8 @@ if (!gotLock) {
   let groups: GroupsService | null = null
   let search: SearchService | null = null
   let msgRepoRef: MsgRepo | null = null
+  let stickerRepo: StickerRepo | null = null
+  let capturing = false
   let pruneTimer: ReturnType<typeof setInterval> | null = null
   let appState: AppState | null = null
   let tray: Tray | null = null
@@ -207,6 +225,7 @@ if (!gotLock) {
 
       search = new SearchService(db, registry, (id) => remarks.get(id) ?? '')
       msgRepoRef = new MsgRepo(db)
+      stickerRepo = new StickerRepo(db)
       chat.prune() // 启动清理（过期队列/去重窗口），之后每小时一次
       pruneTimer = setInterval(() => chat?.prune(), 3_600_000)
       pruneTimer.unref?.()
@@ -240,6 +259,50 @@ if (!gotLock) {
       console.error('[net] UDP 启动失败，进入离线模式：', netState.error)
     }
     mainWindow?.webContents.send(IpcEvents.netState, netState)
+  }
+
+  /** 内置截图（F-CAP-1）：抓主屏 → 框选窗 → 剪贴板（可选直发当前会话） */
+  async function startCapture(): Promise<void> {
+    if (capturing) return
+    if (process.platform === 'linux' && process.env['XDG_SESSION_TYPE'] === 'wayland') {
+      // Wayland 无法全局抓屏（tech-design §9），降级提示
+      if (Notification.isSupported()) {
+        new Notification({ title: '茶话间', body: 'Wayland 下请用系统截图，然后在聊天框 Ctrl+V 发送' }).show()
+      }
+      return
+    }
+    capturing = true
+    const hide = appState?.config.hideOnCapture !== false
+    const wasVisible = mainWindow?.isVisible() ?? false
+    try {
+      if (hide && wasVisible) {
+        mainWindow?.hide()
+        await new Promise((r) => setTimeout(r, 180)) // 等窗口淡出再抓屏
+      }
+      const display = screen.getPrimaryDisplay()
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: Math.round(display.size.width * display.scaleFactor),
+          height: Math.round(display.size.height * display.scaleFactor)
+        }
+      })
+      const source =
+        sources.find((s) => s.display_id === String(display.id)) ?? sources[0] ?? null
+      if (!source || source.thumbnail.isEmpty()) {
+        capturing = false
+        if (hide && wasVisible) showMainWindow()
+        return
+      }
+      openCaptureWindow(display.bounds, source.thumbnail.toDataURL(), display.scaleFactor, () => {
+        capturing = false
+        if (hide && wasVisible) showMainWindow()
+      })
+    } catch (err) {
+      console.warn('[capture] 抓屏失败（macOS 需授予屏幕录制权限）：', err)
+      capturing = false
+      if (hide && wasVisible) showMainWindow()
+    }
   }
 
   /** 新消息系统通知（F-SYS-2）：窗口聚焦时不打扰（应用内角标已可见）；点击直达会话 */
@@ -363,7 +426,8 @@ if (!gotLock) {
       manualPeers: c?.manualPeers ?? [],
       scanRanges: c?.scanRanges ?? [],
       udpPort,
-      tcpPort
+      tcpPort,
+      hideOnCapture: c?.hideOnCapture !== false
     }
   }
 
@@ -470,7 +534,7 @@ if (!gotLock) {
       mkdirSync(dir, { recursive: true })
       const path = join(dir, `${randomUUID()}${ext}`)
       writeFileSync(path, Buffer.from(bytes))
-      return (await files?.offerPaths(peerId, [path], true)) ?? null
+      return (await files?.offerPaths(peerId, [path], 'image')) ?? null
     }
   )
 
@@ -478,7 +542,7 @@ if (!gotLock) {
     if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
     if (typeof path !== 'string' || path.length === 0 || path.length > 2048) return null
     if (!IMG_EXTS.has(extname(path).toLowerCase())) return null
-    return (await files?.offerPaths(peerId, [path], true)) ?? null
+    return (await files?.offerPaths(peerId, [path], 'image')) ?? null
   })
 
   ipcMain.handle(IpcChannels.settingsSaveApp, (_event, patch: unknown): SettingsView => {
@@ -496,6 +560,7 @@ if (!gotLock) {
           .filter((s): s is string => typeof s === 'string')
           .slice(0, 20)
       }
+      if (typeof p.hideOnCapture === 'boolean') clean.hideOnCapture = p.hideOnCapture
       saveAppSettings(appState, clean)
     }
     return settingsView()
@@ -580,6 +645,78 @@ if (!gotLock) {
     return groups?.sendText(groupId, text) ?? null
   })
 
+  ipcMain.handle(IpcChannels.captureStart, () => startCapture())
+
+  ipcMain.handle(IpcChannels.captureDone, (_event, bytes: unknown, send: unknown) => {
+    closeCaptureWindow()
+    if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0) return
+    if (bytes.byteLength > 30 * 1024 * 1024) return
+    const image = nativeImage.createFromBuffer(Buffer.from(bytes))
+    if (image.isEmpty()) return
+    clipboard.writeImage(image) // 始终进剪贴板（随处可贴）
+    if (send === true && mainWindow) {
+      showMainWindow()
+      mainWindow.webContents.send(IpcEvents.captured, bytes)
+    }
+  })
+
+  const stickersDir = (): string => join(app.getPath('userData'), 'data', 'stickers')
+
+  ipcMain.handle(IpcChannels.stickerFetchSource, (_event, transferId: unknown) => {
+    if (typeof transferId !== 'string' || transferId.length > 64) return null
+    const view = files?.transferView(transferId)
+    if (!view?.savedPath) return null
+    try {
+      const buf = readFileSync(view.savedPath)
+      if (buf.length > 25 * 1024 * 1024) return null
+      const ext = extname(view.savedPath).toLowerCase() || '.png'
+      return { bytes: buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength), ext }
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle(
+    IpcChannels.stickerAdd,
+    (_event, bytes: unknown, ext: unknown, w: unknown, h: unknown) => {
+      if (!stickerRepo) return null
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0) return null
+      if (bytes.byteLength > 2 * 1024 * 1024) return null // GIF ≤2MB / 静图压缩后远小于此
+      if (ext !== '.webp' && ext !== '.gif' && ext !== '.png') return null
+      const width = typeof w === 'number' && w > 0 ? Math.round(w) : 0
+      const height = typeof h === 'number' && h > 0 ? Math.round(h) : 0
+      const id = randomUUID()
+      mkdirSync(stickersDir(), { recursive: true })
+      const path = join(stickersDir(), `${id}${ext}`)
+      writeFileSync(path, Buffer.from(bytes))
+      stickerRepo.insert(id, path, width, height, ext === '.gif')
+      return { id, w: width, h: height, animated: ext === '.gif' }
+    }
+  )
+
+  ipcMain.handle(IpcChannels.stickerList, () =>
+    (stickerRepo?.list() ?? []).map((r) => ({
+      id: r.id,
+      w: r.w,
+      h: r.h,
+      animated: r.animated !== 0
+    }))
+  )
+
+  ipcMain.handle(IpcChannels.stickerRemove, (_event, id: unknown) => {
+    if (typeof id !== 'string' || id.length > 64 || !stickerRepo) return
+    const path = stickerRepo.remove(id)
+    if (path) rmSync(path, { force: true })
+  })
+
+  ipcMain.handle(IpcChannels.stickerSend, async (_event, peerId: unknown, id: unknown) => {
+    if (typeof peerId !== 'string' || peerId.length === 0 || peerId.length > 64) return null
+    if (typeof id !== 'string' || id.length > 64 || !stickerRepo) return null
+    const row = stickerRepo.get(id)
+    if (!row) return null
+    return (await files?.offerPaths(peerId, [row.path], 'sticker')) ?? null
+  })
+
   ipcMain.handle(IpcChannels.searchQuery, (_event, query: unknown) => {
     if (typeof query !== 'string' || query.length > 64 || !search) {
       return { peers: [], messageGroups: [], files: [] }
@@ -637,6 +774,21 @@ if (!gotLock) {
       callback({ error: -6 }) // net::ERR_FILE_NOT_FOUND
     })
 
+    // pantry-sticker://<id> —— 同理，只放行表情库登记过的路径
+    protocol.registerFileProtocol('pantry-sticker', (request, callback) => {
+      try {
+        const id = new URL(request.url).hostname
+        const row = stickerRepo?.get(id)
+        if (row) {
+          callback({ path: row.path })
+          return
+        }
+      } catch {
+        // fallthrough
+      }
+      callback({ error: -6 })
+    })
+
     createMainWindow()
     tray = setupTray({
       showWindow: showMainWindow,
@@ -646,6 +798,13 @@ if (!gotLock) {
       }
     })
     void startNet()
+
+    // 截图全局快捷键（F-CAP-1，默认 Ctrl/Cmd+Alt+A；自定义入设置 P1）
+    try {
+      globalShortcut.register('CommandOrControl+Alt+A', () => void startCapture())
+    } catch (err) {
+      console.warn('[capture] 快捷键注册失败（可能被占用）：', err)
+    }
 
     // 冒烟模式：窗口能起、1.5s 后干净退出即算通过（tech-design §10 的 CI 烟测同款）
     if (process.env['PANTRY_SMOKE']) {
@@ -657,6 +816,8 @@ if (!gotLock) {
   })
 
   app.on('activate', () => showMainWindow()) // macOS 点 Dock 唤起
+
+  app.on('will-quit', () => globalShortcut.unregisterAll())
 
   app.on('before-quit', () => {
     isQuitting = true

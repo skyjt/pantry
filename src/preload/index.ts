@@ -15,6 +15,7 @@ import {
   type ProfileSubmit,
   type SearchResult,
   type SettingsView,
+  type StickerView,
   type TransferView
 } from '../shared/ipc'
 
@@ -87,12 +88,30 @@ const api: PantryApi = {
   listGroups: (): Promise<GroupView[]> => ipcRenderer.invoke(IpcChannels.groupList),
   sendGroupText: (groupId: string, text: string): Promise<MessageView | null> =>
     ipcRenderer.invoke(IpcChannels.groupSend, groupId, text),
+  startCapture: (): Promise<void> => ipcRenderer.invoke(IpcChannels.captureStart),
+  captureDone: (bytes: ArrayBuffer, send: boolean): Promise<void> =>
+    ipcRenderer.invoke(IpcChannels.captureDone, bytes, send),
+  fetchStickerSource: (transferId: string): Promise<{ bytes: ArrayBuffer; ext: string } | null> =>
+    ipcRenderer.invoke(IpcChannels.stickerFetchSource, transferId),
+  addSticker: (bytes: ArrayBuffer, ext: string, w: number, h: number): Promise<StickerView | null> =>
+    ipcRenderer.invoke(IpcChannels.stickerAdd, bytes, ext, w, h),
+  listStickers: (): Promise<StickerView[]> => ipcRenderer.invoke(IpcChannels.stickerList),
+  removeSticker: (id: string): Promise<void> => ipcRenderer.invoke(IpcChannels.stickerRemove, id),
+  sendSticker: (peerNodeId: string, stickerId: string): Promise<MessageView | null> =>
+    ipcRenderer.invoke(IpcChannels.stickerSend, peerNodeId, stickerId),
   onPeersUpdated: (listener) => subscribe<PeerView[]>(IpcEvents.peersUpdated, listener),
   onMsgNew: (listener) => subscribe<MessageView>(IpcEvents.msgNew, listener),
   onMsgStatus: (listener) => subscribe<MsgStatusEvent>(IpcEvents.msgStatus, listener),
   onConvsUpdated: (listener) => subscribe<ConversationView[]>(IpcEvents.convsUpdated, listener),
   onTransferUpdated: (listener) => subscribe<TransferView>(IpcEvents.transferUpdated, listener),
   onGroupUpdated: (listener) => subscribe<GroupView>(IpcEvents.groupUpdated, listener),
+  onCaptureInit: (listener) => {
+    const wrapped = (_e: unknown, dataUrl: string, scaleFactor: number): void =>
+      listener(dataUrl, scaleFactor)
+    ipcRenderer.on(IpcEvents.captureInit, wrapped)
+    return () => ipcRenderer.removeListener(IpcEvents.captureInit, wrapped)
+  },
+  onCaptured: (listener) => subscribe<ArrayBuffer>(IpcEvents.captured, listener),
   onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener)
 }
 

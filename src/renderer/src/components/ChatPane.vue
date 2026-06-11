@@ -110,6 +110,15 @@ async function onScroll(): Promise<void> {
   loadingEarlier.value = false
 }
 
+function window_startCapture(): void {
+  void window.pantry.startCapture()
+}
+
+async function sendStickerById(stickerId: string): Promise<void> {
+  showEmoji.value = false
+  await chatStore.sendSticker(stickerId)
+}
+
 function insertEmoji(emoji: string): void {
   const ta = inputEl.value
   if (!ta) {
@@ -237,7 +246,7 @@ async function onDrop(event: DragEvent): Promise<void> {
           :class="[msg.isMine ? 'mine' : 'peer', { highlight: msg.id === chatStore.highlightId }]"
         >
           <FileCard v-if="msg.kind === 'file'" :msg="msg" />
-          <ImageBubble v-else-if="msg.kind === 'image'" :msg="msg" />
+          <ImageBubble v-else-if="msg.kind === 'image' || msg.kind === 'sticker'" :msg="msg" />
           <div v-else class="bubble">
             <span class="text">{{ msg.text }}</span>
           </div>
@@ -275,10 +284,17 @@ async function onDrop(event: DragEvent): Promise<void> {
 
     <footer class="input-area">
       <div class="toolbar">
-        <EmojiPanel v-if="showEmoji" @select="insertEmoji" @close="showEmoji = false" />
+        <EmojiPanel
+          v-if="showEmoji"
+          :sticker-enabled="!isGroup && peerOnline"
+          @select="insertEmoji"
+          @sticker="sendStickerById"
+          @close="showEmoji = false"
+        />
         <button class="tool" title="表情" :disabled="!canSend" @click="showEmoji = !showEmoji">
           😊
         </button>
+        <button class="tool" title="截图（Ctrl/Cmd+Alt+A）" @click="window_startCapture">✂</button>
         <button
           class="tool"
           title="发送图片"
