@@ -545,8 +545,10 @@ async function onDrop(event: DragEvent): Promise<void> {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   background: var(--bg-chat);
   position: relative;
+  overflow: hidden;
 }
 .drop-mask {
   position: absolute;
@@ -643,6 +645,7 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .head {
   height: 52px;
+  flex: 0 0 52px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -664,11 +667,14 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .body-wrap {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 .msgs {
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px 16px;
 }
@@ -804,6 +810,7 @@ async function onDrop(event: DragEvent): Promise<void> {
   color: var(--danger);
 }
 .input-area {
+  flex: 0 0 auto;
   background: var(--bg-window);
   border-top: 1px solid var(--line);
   padding: 8px 12px 10px;
