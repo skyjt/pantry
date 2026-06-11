@@ -15,6 +15,8 @@
     "postinstall": "node node_modules/@electron/rebuild/lib/cli.js -o better-sqlite3",
     "rebuild:electron": "node node_modules/@electron/rebuild/lib/cli.js -f -o better-sqlite3",
     "dev": "electron-vite dev",
+    "dev:2": "sh scripts/dev-clients-2.sh",
+    "dev:3": "sh scripts/dev-clients-3.sh",
     "dev:client1": "sh scripts/dev-client-1.sh",
     "dev:client2": "sh scripts/dev-client-2.sh",
     "dev:client3": "sh scripts/dev-client-3.sh",
