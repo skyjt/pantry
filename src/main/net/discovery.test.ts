@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Profile, Timings } from '../../shared/protocol'
+import { MSG_TYPES, type PeersPayload, type Profile, type Timings } from '../../shared/protocol'
+import { makeEnvelope } from './codec'
 import { UdpChannel } from './udp'
 import { PeerRegistry } from './peer-registry'
 import { Discovery, type ManualPeer } from './discovery'
@@ -39,7 +40,8 @@ const FAST: Partial<Timings> = {
   offlineAfter: 400,
   sweepInterval: 50,
   entryReplyJitterBase: 1, // 测试中应答不抖动
-  entryReplyJitterMax: 1
+  entryReplyJitterMax: 1,
+  gossipInterval: 150
 }
 
 const stacks: Stack[] = []
@@ -107,6 +109,34 @@ describe('discovery 回环集成', () => {
     await b.udp.stop() // 模拟崩溃/拔网线：没有 exit，心跳也停了
 
     await waitFor(() => a.registry.get(b.profile.nodeId)?.online === false, 3000)
+  })
+
+  it('gossip：互不相识的两端经桥节点互见；投毒条目不入表', async () => {
+    const bridge = await makeStack('bridge')
+    const a = await makeStack('alice', [{ host: '127.0.0.1', port: bridge.port }])
+    const c = await makeStack('carol', [{ host: '127.0.0.1', port: bridge.port }])
+    bridge.discovery.start()
+    a.discovery.start()
+    c.discovery.start()
+
+    // a、c 都只认识 bridge；"结识即交换"+周期 gossip 应让 a/c 互见（§6.3 三板斧之三）
+    await waitFor(
+      () =>
+        a.registry.get(c.profile.nodeId)?.online === true &&
+        c.registry.get(a.profile.nodeId)?.online === true,
+      4000
+    )
+    expect(a.registry.get(c.profile.nodeId)?.profile.nick).toBe('carol')
+
+    // 投毒：伪造 peers 报文塞一个不存在的节点 → a 只会发 entry 验证（无人应答），不得入表
+    const evil = makeEnvelope<PeersPayload>(MSG_TYPES.peers, bridge.profile.nodeId, {
+      peers: [
+        { nodeId: 'node-ghost', ip: '127.0.0.1', udpPort: 9, tcpPort: 9, lastSeen: Date.now() }
+      ]
+    })
+    bridge.udp.send(evil, '127.0.0.1', a.port)
+    await sleep(400)
+    expect(a.registry.get('node-ghost')).toBeUndefined()
   })
 
   it('资料变更后，presence 版本失配触发自动刷新（防机器换人）', async () => {

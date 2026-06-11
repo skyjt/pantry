@@ -112,7 +112,7 @@ sequenceDiagram
 
 1. **手动节点**：对用户填的 IP / 导入列表逐个单播 `entry`，收到 `alive` 即建立联系。
 2. **网段扫描**：对配置的 CIDR（如 `10.1.0.0/24`）限速单播 `entry`（≤ 128 地址/秒），无应答地址不重试（手动触发才扫）。
-3. **gossip 散播**：`alive` 搭车携带、且每 5 分钟向随机 2 个已知节点发送 `peers`：
+3. **gossip 散播**：**结识即交换**（首次得知某节点在线时，把自己已知的在线节点摘要单播给它）+ 每 5 分钟向随机 2 个在线节点周期交换，报文为 `peers`：
 
 ```jsonc
 { "peers": [ { "nodeId": "…", "ip": "10.2.0.8", "tcpPort": 17879, "lastSeen": 1780000000000 } ] }
@@ -216,7 +216,7 @@ sequenceDiagram
 | ACK_RETRY | 1s / 2s / 4s ×3 | 之后入补发队列 |
 | ENTRY_REPLY_JITTER | 0–2s，按在线规模自适应扩至 0–8s | 防应答风暴（含批量开机，§6.1） |
 | PRESENCE_INTERVAL / OFFLINE_AFTER | 30s / 90s | 决议 #1，实测可调 |
-| GOSSIP_INTERVAL | 5 min，随机 2 节点 | |
+| GOSSIP_INTERVAL | 5 min，随机 2 节点；另有"结识即交换" | 条目新鲜度门槛 10 min |
 | SCAN_RATE | ≤ 128 地址/s | 手动触发 |
 | PEER_CACHE_TTL | 7 天 | 启动单播探测范围 |
 | DEDUP_TTL | 24 h | 已收 id 去重窗口 |
@@ -260,3 +260,4 @@ sequenceDiagram
 - 2026-06-10 v0.6 查漏轮（决议 #22）：§6.1 增加批量开机风暴对策（自适应抖动/去重应答/削峰自愈）；`peers` 报文明确拆包约定。
 - 2026-06-11 v0.7 文件传输落地实测：§8 明确 TCP 帧型清单，新增 `finish`（接收方完成信号）与 `err`（拒绝原因）两帧；`file-ctl` 进入可靠投递类型（与 msg 同样 ACK+重传，但**离线不入队**，决议 #4）。
 - 2026-06-11 v0.8 图片消息方案修订：弃用"msg(kind:image) + 传输"双报文，改为 offer 携带 `purpose:"image"`（§7.1），单一事实源；`msg.kind` 的 `image` 仅存在于本地消息记录。
+- 2026-06-11 v0.9 gossip 落地修订：弃用"alive 搭车"（alive 保持轻量，1200B 限制下易超），改为**结识即交换 + 5 分钟周期兜底**；`peers` 条目校验入 codec；节点缓存启动探测（§6.3 末条）同步实现。

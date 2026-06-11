@@ -1,8 +1,12 @@
 import type { RemoteInfo } from 'node:dgram'
 import {
+  GOSSIP_FANOUT,
   MSG_TYPES,
+  PEERS_PER_PACKET,
   TIMINGS,
   type Envelope,
+  type PeersPayload,
+  type PeerSummary,
   type PresencePayload,
   type Profile,
   type ProfilePayload,
@@ -41,9 +45,12 @@ export class Discovery {
   private presenceSeq = 0
   private presenceTimer: ReturnType<typeof setInterval> | null = null
   private sweepTimer: ReturnType<typeof setInterval> | null = null
+  private gossipTimer: ReturnType<typeof setInterval> | null = null
   private readonly pendingReplies = new Map<string, ReturnType<typeof setTimeout>>()
   /** nodeId → 最近一次发 alive 的时间（§6.1 去重应答，防批量开机风暴） */
   private readonly lastAliveAt = new Map<string, number>()
+  /** 已做过"结识即交换"的节点（§6.3 gossip），避免反复发 */
+  private readonly gossiped = new Set<string>()
 
   constructor(opts: DiscoveryOptions) {
     this.udp = opts.udp
@@ -54,6 +61,12 @@ export class Discovery {
     this.udp.on('envelope', (env: Envelope, known: boolean, rinfo: RemoteInfo) => {
       if (known) this.handle(env, rinfo)
       // 未知类型按协议忽略（向前兼容）
+    })
+    // 结识即交换（§6.3）：首次得知某节点在线 → 把我已知的在线节点摘要告诉它
+    this.registry.on('online', (nodeId: string) => {
+      if (this.gossiped.has(nodeId)) return
+      this.gossiped.add(nodeId)
+      this.sendPeersTo(nodeId)
     })
   }
 
@@ -69,14 +82,28 @@ export class Discovery {
 
     this.presenceTimer = setInterval(() => this.sendPresence(), this.t.presenceInterval)
     this.sweepTimer = setInterval(() => this.registry.sweep(this.t.offlineAfter), this.t.sweepInterval)
+    this.gossipTimer = setInterval(() => this.gossipRound(), this.t.gossipInterval)
     this.presenceTimer.unref?.()
     this.sweepTimer.unref?.()
+    this.gossipTimer.unref?.()
+
+    // 节点缓存启动探测（§6.3）：对 7 天内活跃过的离线节点错峰单播 entry，
+    // 广播不可达（跨网段）时靠它快速重建在线列表
+    const now = Date.now()
+    const stale = this.registry
+      .list()
+      .filter((r) => !r.online && now - r.lastSeen < this.t.peerCacheProbeTtl)
+    stale.forEach((record, i) => {
+      const timer = setTimeout(() => this.probe(record.ip, record.udpPort), 50 * i)
+      timer.unref?.()
+    })
   }
 
   /** 退出：广播 exit，并对在线节点逐个单播（跨网段节点收不到广播，protocol §6.1） */
   stop(): void {
     if (this.presenceTimer) clearInterval(this.presenceTimer)
     if (this.sweepTimer) clearInterval(this.sweepTimer)
+    if (this.gossipTimer) clearInterval(this.gossipTimer)
     for (const timer of this.pendingReplies.values()) clearTimeout(timer)
     this.pendingReplies.clear()
 
@@ -90,6 +117,40 @@ export class Discovery {
   /** 按需探活（F-DISC-8）：复用 entry，对方回 alive 即在线 */
   probe(host: string, port: number): void {
     this.udp.send(this.envEntry(), host, port)
+  }
+
+  /** 周期 gossip（§6.3 兜底）：向随机 GOSSIP_FANOUT 个在线节点交换摘要 */
+  private gossipRound(): void {
+    const online = this.registry.list().filter((r) => r.online)
+    if (online.length === 0) return
+    const shuffled = [...online].sort(() => Math.random() - 0.5)
+    for (const record of shuffled.slice(0, GOSSIP_FANOUT)) {
+      this.sendPeersTo(record.profile.nodeId)
+    }
+  }
+
+  /** 把我已知的在线节点摘要（排除自己与对方）分包单播给目标 */
+  private sendPeersTo(nodeId: string): void {
+    const target = this.registry.get(nodeId)
+    if (!target) return
+    const summaries: PeerSummary[] = this.registry
+      .list()
+      .filter((r) => r.online && r.profile.nodeId !== nodeId)
+      .map((r) => ({
+        nodeId: r.profile.nodeId,
+        ip: r.ip,
+        udpPort: r.udpPort,
+        tcpPort: r.profile.tcpPort,
+        lastSeen: r.lastSeen
+      }))
+    for (let i = 0; i < summaries.length; i += PEERS_PER_PACKET) {
+      const payload: PeersPayload = { peers: summaries.slice(i, i + PEERS_PER_PACKET) }
+      this.udp.send(
+        makeEnvelope(MSG_TYPES.peers, this.selfId, payload),
+        target.ip,
+        target.udpPort
+      )
+    }
   }
 
   /** 资料变更广播（向导/设置保存后）：同网段即时刷新；跨网段靠 presence 的 rev 失配兜底 */
@@ -153,6 +214,18 @@ export class Discovery {
         if (knownRev !== -1 && presence.profileRev !== knownRev) {
           // 资料版本失配 → 发 entry 触发对方回 alive（全量资料），§6.2 防"机器换人"
           this.udp.send(this.envEntry(), rinfo.address, rinfo.port)
+        }
+        break
+      }
+      case MSG_TYPES.peers: {
+        // gossip：转述不直接入表——对陌生且新鲜的条目单播 entry 验证（防列表投毒）
+        const { peers } = env.payload as PeersPayload
+        const now = Date.now()
+        for (const summary of peers) {
+          if (summary.nodeId === this.selfId) continue
+          if (this.registry.get(summary.nodeId)?.online) continue
+          if (now - summary.lastSeen > this.t.gossipFreshness) continue
+          this.probe(summary.ip, summary.udpPort)
         }
         break
       }

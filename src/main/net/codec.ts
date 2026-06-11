@@ -12,10 +12,12 @@ import {
   type FileCtlOffer,
   type FileCtlPayload,
   type MsgPayload,
+  type PeersPayload,
   type PresencePayload,
   type Profile,
   type ProfilePayload
 } from '../../shared/protocol'
+import { PEERS_PER_PACKET } from '../../shared/protocol'
 
 // 信封编解码 + 入站校验（protocol §1/§4）：
 // 一切来自网络的报文按不可信输入处理 —— 字段白名单、类型、长度全检；
@@ -123,10 +125,30 @@ function validatePayload(type: string, payload: unknown): boolean {
           (m.isDir === undefined || typeof m.isDir === 'boolean')
       )
     }
+    case MSG_TYPES.peers: {
+      if (!isRecord(payload)) return false
+      const p = payload as Partial<PeersPayload>
+      if (!Array.isArray(p.peers) || p.peers.length === 0 || p.peers.length > PEERS_PER_PACKET * 2)
+        return false
+      return p.peers.every(
+        (s) =>
+          isRecord(s) &&
+          isStr(s.nodeId, LIMITS.from) &&
+          isStr(s.ip, 45) &&
+          isInt(s.udpPort) &&
+          s.udpPort >= 1 &&
+          s.udpPort <= 65535 &&
+          isInt(s.tcpPort) &&
+          s.tcpPort >= 1 &&
+          s.tcpPort <= 65535 &&
+          isInt(s.lastSeen) &&
+          s.lastSeen >= 0
+      )
+    }
     case MSG_TYPES.exit:
       return isRecord(payload)
     default:
-      // 其余已知类型（peers/group）随对应功能落地时补校验
+      // 其余已知类型（group）随对应功能落地时补校验
       return isRecord(payload)
   }
 }

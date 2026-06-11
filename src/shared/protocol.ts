@@ -31,9 +31,20 @@ export const TIMINGS = {
   queueTtl: 7 * 24 * 3_600_000,
   queueMaxPerPeer: 200,
   /** 已收消息 ID 去重窗口（§7.2） */
-  dedupTtl: 24 * 3_600_000
+  dedupTtl: 24 * 3_600_000,
+  /** gossip 周期交换间隔（§6.3，另有"结识即交换"） */
+  gossipInterval: 300_000,
+  /** gossip 条目新鲜度门槛：lastSeen 超过此值的转述不予验证 */
+  gossipFreshness: 600_000,
+  /** 节点缓存启动探测范围：lastSeen 在此窗口内的离线节点逐个单播 entry（§6.3） */
+  peerCacheProbeTtl: 7 * 24 * 3_600_000
 }
 export type Timings = typeof TIMINGS
+
+/** peers 报文单包条目上限（条目约 120B，保证 ≤ UDP_MAX_PAYLOAD） */
+export const PEERS_PER_PACKET = 8
+/** gossip 周期交换的扇出节点数 */
+export const GOSSIP_FANOUT = 2
 
 /** 字段长度上限（入站校验白名单，protocol §1 第 5 条） */
 export const LIMITS = {
@@ -95,6 +106,19 @@ export interface PresencePayload {
 
 /** exit 载荷（空对象） */
 export type ExitPayload = Record<string, never>
+
+export interface PeerSummary {
+  nodeId: string
+  ip: string
+  udpPort: number
+  tcpPort: number
+  lastSeen: number
+}
+
+/** gossip 节点摘要交换（§6.3）：收端对陌生且新鲜的条目单播 entry 验证，不直接入表 */
+export interface PeersPayload {
+  peers: PeerSummary[]
+}
 
 /** 用户消息载荷（§7.1）。v0.1 仅 text；image/sticker/group-text 随功能落地扩展 */
 export interface MsgPayload {
