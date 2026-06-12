@@ -198,7 +198,7 @@ media/stickers/...  # 自定义表情包媒体
 | Debian 10 / UOS 20 glibc 2.28 vs CI 编译环境 | linux 侧 better-sqlite3 在 **debian:10 容器**内编译（apt 指向 archive 源）；electron-builder 关闭二次 `npmRebuild`，避免预编译包覆盖源码编译结果；CI 对源码重建产物与最终 `app.asar.unpacked` 内 `.node` 做 `GLIBC_2.28` 上限检查；产物在真 Debian 10 / UOS 20 冒烟 |
 | linux arm64 交叉编译 native 模块 | docker buildx + qemu；若拖累节奏，v1 先发 x64，arm64 列 P2 产物（README 平台表加注） |
 | macOS 26 跑 Chromium 108 | 已知风险项（README FAQ）：输入法、通知权限、屏幕录制授权列入发布冒烟清单 |
-| Win7 终端为统一 VM（虚拟显卡弱/驱动旧） | **Win7 默认禁用硬件加速走软渲染**——VM 虚拟显卡是 Electron 花屏/白屏的头号惯犯，2D 聊天界面软渲染完全流畅；其他平台默认开启，高级设置留开关 |
+| Win7 终端为统一 VM（虚拟显卡弱/驱动旧）；UOS/Debian 多国产 GPU 或旧驱动 | **Win7 与 Linux 默认禁用硬件加速走软渲染**（决议 #55）——VM 虚拟显卡与国产 GPU 驱动是 Electron 花屏/GPU 进程报错的头号惯犯，2D 聊天界面软渲染完全流畅；macOS 默认开启，高级设置留开关 |
 | Wayland 无法全局截图 | 启动检测 `XDG_SESSION_TYPE`，Wayland 下截图按钮降级提示"用系统截图后 Ctrl+V" |
 | UDP 广播被交换机/AP 隔离 | 协议已有三板斧兜底（手动 IP/扫描/gossip）；FAQ 文档化引导 IT 放行 |
 | 超大文件/超大图片打爆内存 | 文件收发全程流式（pull 流直写磁盘），内存中永不持有整文件；图片解码限制单图 ≤50MP |
@@ -265,3 +265,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.28 沉浸式窗口与镜像对齐：主窗 / 设置窗 frameless（决议 #49，新增 `win:minimize` / `win:toggle-maximize` / `win:is-maximized` IPC 与 `win:maximized-changed` 事件，渲染层 `WindowControls` 组件）；输入框 emoji 镜像层改为隐藏 DOM 探针按实际字体逐字符测宽对齐（`utils/emoji-metrics`；canvas measureText 对 emoji 的度量与 DOM 排版不一致不可用；探针挂 `<html>` 下避开 body zoom 字体缩放）；设置页头像编辑器重排（决议 #50，纯渲染层改动）。
 - 2026-06-12 v0.29 沉浸式跨平台修正（决议 #51/#52）：mac 主窗 `trafficLightPosition` 移至 x=68；Linux 弃用 CSS 拖拽区，新增 `win:begin-drag` / `win:end-drag` IPC（主进程光标跟随移窗），渲染层拖拽带抽为 `WindowDragStrip` 组件按平台分流。
 - 2026-06-12 v0.30 UOS20 glibc 2.28 打包修正：electron-builder 关闭二次 native rebuild，Linux `dist` 前强制源码重建 better-sqlite3，并在 CI 校验源码重建产物与最终包内 `.node` 的最高 GLIBC 符号不超过 2.28。
+- 2026-06-12 v0.31 决议 #55 与拖拽区修正：Linux 与 Win7 同策略默认禁硬件加速（§9 风险表更新）；删除聊天头部 `-webkit-app-region: no-drag` 残留——no-drag 矩形会从 drag region 中挖洞，导致 Win7/mac 聊天区顶部 32px 无法拖窗。
