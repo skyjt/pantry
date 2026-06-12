@@ -59,6 +59,7 @@ const peerName = computed(() => {
   if (isGroup.value) return group.value?.name ?? '讨论组'
   return peer.value ? peer.value.remark || peer.value.nick : '未知节点'
 })
+const peerIp = computed(() => peer.value?.ip ?? '')
 const peerOnline = computed(() => peer.value?.online ?? false)
 /** 群：成员才可发；单聊：文本随时可发（离线走补发） */
 const canSend = computed(() => (isGroup.value ? (group.value?.amMember ?? false) : true))
@@ -429,7 +430,10 @@ async function onDrop(event: DragEvent): Promise<void> {
     <ForwardDialog v-if="forwardMsg" :msg="forwardMsg" @close="forwardMsg = null" />
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
-      <span class="title">{{ peerName }}</span>
+      <span class="title-block">
+        <span class="title">{{ peerName }}</span>
+        <span v-if="!isGroup && peerIp" class="subtitle">{{ peerIp }}</span>
+      </span>
       <span v-if="isGroup" class="state">{{ group?.members.length ?? 0 }} 人</span>
       <span v-else class="state" :class="{ on: peerOnline }">{{
         peerOnline ? '● 在线' : '离线'
@@ -809,6 +813,17 @@ async function onDrop(event: DragEvent): Promise<void> {
 .title {
   font-size: 15px;
   font-weight: 600;
+}
+.title-block {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.subtitle {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-3);
 }
 .state {
   font-size: 12px;
