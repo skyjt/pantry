@@ -36,6 +36,7 @@
 - TypeScript strict；文档、注释、commit message、UI 文案一律简体中文。
 - UI 遵循 `docs/ui-design.md`：颜色/字号/圆角只用 `tokens.css` 的 CSS 变量、圆形头像、茶青主色 `#3D8B6B`、不引入组件库；离线展示必须灰显 + "离线"副文字（决议 #17）。
 - commit：`feat/fix/docs/refactor/test/chore` 前缀 + 中文描述；一个完整增量一个 commit。
+- **每轮迭代必须递增版本号（决议 #53）**：每个增量 commit 同步把 `package.json` 的 `version` patch 位 +1——deb/NSIS 按版本号判断升级，同版本号 UOS 上 dpkg 会以"已安装同样版本"拒装。改了代码不改版本号 = 交付不完整。
 - `references/` 下新增任何资料须在 `references/readme.md` 登记。
 
 ## 每次改动的验证清单（全过才算完成）
@@ -52,6 +53,7 @@ npm run smoke       # 构建 + 启动 1.5s 干净退出（退出码 0）
 
 - 网络相关测试必须绑定 `127.0.0.1` 且 `broadcastTargets: []`——**测试永不向真实局域网发包**。
 - 网络层（`src/main/net/`）的行为改动必须有对应回环集成测试。
+- 提交前自查 `package.json` 版本号已随本轮迭代递增（决议 #53）。
 
 ## 环境与已知坑
 
