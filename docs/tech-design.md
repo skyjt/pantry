@@ -163,7 +163,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
 - **系统图标自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色，避免系统 emoji 字形在 Win7/不同平台上变成五颜六色或缺字。emoji 面板与消息正文里的 emoji 仍是用户内容；Win7 彩色 emoji 子集图片替换留待 Win7 冒烟时做。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
-- **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
+- **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。
 - token 全部走 `styles/tokens.css` CSS 变量（深色主题 v0.4 只换变量表）。
 - 性能预算（NFR 对照）：通讯录树重聚合 ≤16ms（1000 节点，主进程聚合好再推）；搜索请求防抖 200ms；`transfer:progress` 节流后 UI 才消费。
@@ -242,3 +242,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.11 头像模板与设置图标修正：头像编号保持 number，前端按“20 个亲和动物 emoji 图标 + 背景色下标”组合解释；设置入口 SVG 重画为明确齿轮。
 - 2026-06-12 v0.12 讨论组创建搜索与密码提示：groups 表迁移 v8 增加 `admin_hint`，群元数据/备份包携带密码提示；建群 UI 改为搜索选人后再设置组名与二次密码确认。
 - 2026-06-12 v0.13 群聊媒体落地：文件 offer 支持群上下文，群聊图片/文件按在线成员逐个点对点传输；发送端一条消息汇总多条 transfer，收端入群会话。
+- 2026-06-12 v0.14 群聊图片阈值修订：群聊图片内联上限收紧为 10MB；超限图片按普通文件卡片展示，接收端手动接收后才开始 TCP 拉取。
