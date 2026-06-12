@@ -28,9 +28,9 @@
     "test": "vitest run",
     "test:db": "esbuild src/main/store/db-selftest.ts --bundle --platform=node --target=node16 --external:better-sqlite3 --outfile=out/db-selftest.cjs --log-level=warning && cross-env ELECTRON_RUN_AS_NODE=1 electron out/db-selftest.cjs",
     "smoke": "npm run build && cross-env PANTRY_SMOKE=1 electron .",
-    "dist:win": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --win --x64",
-    "dist:linux": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --linux --x64",
-    "dist:mac": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --mac"
+    "dist:win": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --win --x64 --publish never",
+    "dist:linux": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --linux --x64 --publish never",
+    "dist:mac": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --mac --publish never"
   },
   "build": {
     "appId": "com.pantry.app",
@@ -49,6 +49,7 @@
     ],
     "publish": null,
     "win": {
+      "icon": "build/icons/pantry-logo-icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -75,6 +76,7 @@
       "artifactName": "Pantry-${version}-win-${arch}-portable.${ext}"
     },
     "linux": {
+      "icon": "build/icons/pantry-logo-icon.png",
       "target": [
         {
           "target": "deb",
@@ -105,6 +107,7 @@
       ]
     },
     "mac": {
+      "icon": "build/icons/pantry-logo-icon.icns",
       "target": [
         "dmg",
         "zip"
