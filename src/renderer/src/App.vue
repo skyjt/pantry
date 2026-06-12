@@ -92,7 +92,7 @@ onUnmounted(() => {
         title="聊天"
         @click="tab = 'chat'"
       >
-        <PantryIcon name="chat" :size="19" />
+        <PantryIcon name="chat" :size="21" />
         <span v-if="chatStore.totalUnread > 0" class="rail-badge">{{
           chatStore.totalUnread > 99 ? '99+' : chatStore.totalUnread
         }}</span>
@@ -103,11 +103,11 @@ onUnmounted(() => {
         title="通讯录"
         @click="tab = 'contacts'"
       >
-        <PantryIcon name="contacts" :size="19" />
+        <PantryIcon name="contacts" :size="21" />
       </button>
       <div class="spacer"></div>
       <button class="rail-btn" title="设置" @click="openSettings">
-        <PantryIcon name="settings" :size="19" />
+        <PantryIcon name="settings" :size="21" />
       </button>
     </nav>
 
