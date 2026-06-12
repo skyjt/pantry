@@ -209,7 +209,7 @@ media/stickers/...  # 自定义表情包媒体
 
 - electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（首版 x64，Debian 10 真机/VM 验证后再扩 arm64）；mac=`dmg`+`zip`（首版当前架构，universal 包后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；productName `茶话间`，appId `com.pantry.app`。
 - 品牌资源：`build/icons/` 保存可审阅 SVG 源和生成后的 `.png` / `.ico` / `.icns` 打包图标；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
-- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3 并输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
+- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3 并输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物，`.deb` 维护者元数据固定为 `Pantry Maintainers <pantry-maintainers@example.invalid>`。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
 - 版本号：`package.json` 单一来源；协议 `profile.ver` 随包版本注入（"内网有新版"提示的依据，见 protocol §3）。
 - 内网分发：产物 + SHA-256 校验清单一并产出。
 
@@ -257,4 +257,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.21 联系人资料页重设计：`PeerList` 双击事件复用打开单聊流程，`ProfileCard` 改为内容区完整资料页。
 - 2026-06-12 v0.22 托盘未读提示：`convs` 未读总数统一驱动 macOS 菜单栏数字 / Dock 角标、Windows taskbar overlay 数字与 Windows/Linux 托盘闪烁兜底。
 - 2026-06-12 v0.23 菜单栏 logo 尺寸：托盘基础单色标识在 32px 画布内缩至约 82% 内容区，未读闪烁图标复用同一缩放比例。
-- 2026-06-12 v0.24 GitHub Actions 发布链路：新增 Windows 7 x64 与 Debian 10 / UOS 20 x64 自动构建、SHA-256 清单、tag Release 发布；Windows 安装版与便携版 artifactName 拆分，避免同名覆盖；打包图标显式接入 `.ico` / `.png` / `.icns`，Linux CI 强制源码重建 native 模块以锁住 glibc 2.28。
+- 2026-06-12 v0.24 GitHub Actions 发布链路：新增 Windows 7 x64 与 Debian 10 / UOS 20 x64 自动构建、SHA-256 清单、tag Release 发布；Windows 安装版与便携版 artifactName 拆分，避免同名覆盖；打包图标显式接入 `.ico` / `.png` / `.icns`，Linux CI 强制源码重建 native 模块以锁住 glibc 2.28，并补齐 `.deb` Maintainer 元数据。
