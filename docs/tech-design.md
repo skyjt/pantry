@@ -195,7 +195,7 @@ media/stickers/...  # 自定义表情包媒体
 | 风险 | 对策 |
 |---|---|
 | Win7 / UOS emoji / 系统图标字形不一致 | 系统图标自绘；头像模板、emoji 面板、输入框编辑态和消息正文内置 emoji 子集使用 Twemoji 本地 SVG 子集（§7），不依赖系统彩色 emoji 字体 |
-| Debian 10 glibc 2.28 vs CI 编译环境 | linux 侧 better-sqlite3 在 **debian:10 容器**内编译（apt 指向 archive 源）；产物在真 Debian 10 冒烟 |
+| Debian 10 / UOS 20 glibc 2.28 vs CI 编译环境 | linux 侧 better-sqlite3 在 **debian:10 容器**内编译（apt 指向 archive 源）；electron-builder 关闭二次 `npmRebuild`，避免预编译包覆盖源码编译结果；CI 对源码重建产物与最终 `app.asar.unpacked` 内 `.node` 做 `GLIBC_2.28` 上限检查；产物在真 Debian 10 / UOS 20 冒烟 |
 | linux arm64 交叉编译 native 模块 | docker buildx + qemu；若拖累节奏，v1 先发 x64，arm64 列 P2 产物（README 平台表加注） |
 | macOS 26 跑 Chromium 108 | 已知风险项（README FAQ）：输入法、通知权限、屏幕录制授权列入发布冒烟清单 |
 | Win7 终端为统一 VM（虚拟显卡弱/驱动旧） | **Win7 默认禁用硬件加速走软渲染**——VM 虚拟显卡是 Electron 花屏/白屏的头号惯犯，2D 聊天界面软渲染完全流畅；其他平台默认开启，高级设置留开关 |
@@ -210,7 +210,7 @@ media/stickers/...  # 自定义表情包媒体
 
 - electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（首版 x64，Debian 10 真机/VM 验证后再扩 arm64）；mac=`dmg`+`zip`（首版当前架构，universal 包后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；productName `茶话间`，appId `com.pantry.app`。
 - 品牌资源：`build/icons/` 保存可审阅 SVG 源和生成后的 `.png` / `.ico` / `.icns` 打包图标；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
-- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3 并输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物，`.deb` 维护者元数据固定为 `Pantry Maintainers <pantry-maintainers@example.invalid>`。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
+- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3，electron-builder 关闭二次 `npmRebuild`，并检查最终包内 native 模块最高 GLIBC 符号不超过 `GLIBC_2.28`，输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物，`.deb` 维护者元数据固定为 `Pantry Maintainers <pantry-maintainers@example.invalid>`。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
 - 版本号：`package.json` 单一来源；协议 `profile.ver` 随包版本注入（"内网有新版"提示的依据，见 protocol §3）。**每轮迭代（每个增量 commit）patch 位递增**（决议 #53）：deb/NSIS 按版本号判断升级，同版本号在 UOS 上会被 dpkg 以"已安装同样版本"拒装；artifactName 含 `${version}`，产物名随之区分。
 - 内网分发：产物 + SHA-256 校验清单一并产出。
 
@@ -264,3 +264,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.27 输入框 emoji 兼容补齐：聊天输入框在草稿包含内置 emoji 时启用 Twemoji 本地 SVG 镜像层，底层仍保留原生 textarea 编辑行为。
 - 2026-06-12 v0.28 沉浸式窗口与镜像对齐：主窗 / 设置窗 frameless（决议 #49，新增 `win:minimize` / `win:toggle-maximize` / `win:is-maximized` IPC 与 `win:maximized-changed` 事件，渲染层 `WindowControls` 组件）；输入框 emoji 镜像层改为隐藏 DOM 探针按实际字体逐字符测宽对齐（`utils/emoji-metrics`；canvas measureText 对 emoji 的度量与 DOM 排版不一致不可用；探针挂 `<html>` 下避开 body zoom 字体缩放）；设置页头像编辑器重排（决议 #50，纯渲染层改动）。
 - 2026-06-12 v0.29 沉浸式跨平台修正（决议 #51/#52）：mac 主窗 `trafficLightPosition` 移至 x=68；Linux 弃用 CSS 拖拽区，新增 `win:begin-drag` / `win:end-drag` IPC（主进程光标跟随移窗），渲染层拖拽带抽为 `WindowDragStrip` 组件按平台分流。
+- 2026-06-12 v0.30 UOS20 glibc 2.28 打包修正：electron-builder 关闭二次 native rebuild，Linux `dist` 前强制源码重建 better-sqlite3，并在 CI 校验源码重建产物与最终包内 `.node` 的最高 GLIBC 符号不超过 2.28。
