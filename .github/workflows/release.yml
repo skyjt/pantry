@@ -48,6 +48,11 @@ jobs:
       - name: 安装 npm 依赖
         run: npm ci
 
+      - name: 重建 Debian 10 native 模块
+        env:
+          npm_config_build_from_source: "true"
+        run: npm run rebuild:electron
+
       - name: 五连验证
         shell: bash
         run: |

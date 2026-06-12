@@ -162,7 +162,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 
 - **虚拟滚动**：消息列表（倒序无限滚动、按 50 条分页拉取）与通讯录扁平化树（1000 节点）两处必须虚拟化；优先自写轻量实现，复杂度超预期则退 `@vueuse/core useVirtualList`（纯逻辑库，无 DOM 依赖风险）。
 - **系统图标自绘**：导航、工具栏、文件卡、状态位统一走 `PantryIcon` 自绘 SVG，图标继承文字色，避免系统 emoji 字形在 Win7/不同平台上变成五颜六色或缺字。emoji 面板与消息正文里的 emoji 仍是用户内容；Win7 彩色 emoji 子集图片替换留待 Win7 冒烟时做。
-- **品牌 logo 自绘**：`build/icons/pantry-logo-mono.svg`、`pantry-logo-small.svg`、`pantry-logo-icon.svg` 是品牌源文件；渲染层空状态使用 `PantryBrandLogo` 复用同一轮廓。托盘图标由 `scripts/gen-tray-icon.mjs` 生成 32×32 单色 PNG 后内嵌到 `src/main/windows/tray-icon.ts`，基础标识缩至约 82% 内容区，macOS 运行时标记为 template image 适配菜单栏。
+- **品牌 logo 自绘**：`build/icons/pantry-logo-mono.svg`、`pantry-logo-small.svg`、`pantry-logo-icon.svg` 是品牌源文件；`pantry-logo-icon.png` / `.ico` / `.icns` 是 electron-builder 打包资产，均由 SVG 源生成。渲染层空状态使用 `PantryBrandLogo` 复用同一轮廓。托盘图标由 `scripts/gen-tray-icon.mjs` 生成 32×32 单色 PNG 后内嵌到 `src/main/windows/tray-icon.ts`，基础标识缩至约 82% 内容区，macOS 运行时标记为 template image 适配菜单栏。
 - **托盘未读提示**：`ChatService` / `FilesService` 的 `convs` 事件统一汇总未读数后调用 `updateTrayUnread`（决议 #42）。macOS 使用 `Tray.setTitle` + `dock.setBadge` 显示数字；Windows 使用 `BrowserWindow.setOverlayIcon` 叠加 16×16 数字，并让托盘图标在原图与带数字角标图之间闪烁；Linux 调 `app.setBadgeCount` 作为 best effort，同时以托盘闪烁兜底。动态图标由 `tray-badge.ts` 纯 Node PNG 编码生成，不引入图片库或 native 依赖。
 - **图片管线（全在 renderer canvas）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
@@ -208,8 +208,8 @@ media/stickers/...  # 自定义表情包媒体
 ## 10. 构建与 CI
 
 - electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（首版 x64，Debian 10 真机/VM 验证后再扩 arm64）；mac=`dmg`+`zip`（首版当前架构，universal 包后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；productName `茶话间`，appId `com.pantry.app`。
-- 品牌资源：`build/icons/` 保存可审阅 SVG 源；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
-- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器编译 native 模块并输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
+- 品牌资源：`build/icons/` 保存可审阅 SVG 源和生成后的 `.png` / `.ico` / `.icns` 打包图标；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
+- GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3 并输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
 - 版本号：`package.json` 单一来源；协议 `profile.ver` 随包版本注入（"内网有新版"提示的依据，见 protocol §3）。
 - 内网分发：产物 + SHA-256 校验清单一并产出。
 
@@ -257,4 +257,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.21 联系人资料页重设计：`PeerList` 双击事件复用打开单聊流程，`ProfileCard` 改为内容区完整资料页。
 - 2026-06-12 v0.22 托盘未读提示：`convs` 未读总数统一驱动 macOS 菜单栏数字 / Dock 角标、Windows taskbar overlay 数字与 Windows/Linux 托盘闪烁兜底。
 - 2026-06-12 v0.23 菜单栏 logo 尺寸：托盘基础单色标识在 32px 画布内缩至约 82% 内容区，未读闪烁图标复用同一缩放比例。
-- 2026-06-12 v0.24 GitHub Actions 发布链路：新增 Windows 7 x64 与 Debian 10 / UOS 20 x64 自动构建、SHA-256 清单、tag Release 发布；Windows 安装版与便携版 artifactName 拆分，避免同名覆盖。
+- 2026-06-12 v0.24 GitHub Actions 发布链路：新增 Windows 7 x64 与 Debian 10 / UOS 20 x64 自动构建、SHA-256 清单、tag Release 发布；Windows 安装版与便携版 artifactName 拆分，避免同名覆盖；打包图标显式接入 `.ico` / `.png` / `.icns`，Linux CI 强制源码重建 native 模块以锁住 glibc 2.28。
