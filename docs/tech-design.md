@@ -100,7 +100,7 @@ src/
 
 | 通道 | 说明 |
 |---|---|
-| `peers:list` / `peers:probe` / `peers:addManual` / `peers:scan` | 通讯录、探活（F-DISC-8）、手动 IP、网段扫描 |
+| `peers:list` / `peers:probe` / `peers:addManual` / `peers:scan` / `peers:set-remark` | 通讯录、探活（F-DISC-8）、手动 IP、网段扫描、本地备注 |
 | `conv:list` / `conv:pin` / `conv:mute` / `conv:markRead` / `conv:remove` | 会话列表操作 |
 | `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` / `msg:search` | 消息分页（倒序游标）、发送、重发、撤回、当前会话历史搜索 |
 | `file:offer` / `group-file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套；群聊发送为多条点对点 transfer 的发送侧编排 |
@@ -138,7 +138,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 ```
 
 - 索引：`messages(conv_id, ts, seq)`、`peers(last_seen)`、`send_queue(peer_id)`、`transfers(status)`。
-- `remark` 为本地备注名（决议 #22）：仅本机、不入协议；显示与搜索优先命中备注。
+- `remark` 为本地备注名（决议 #22/#37）：仅本机、不入协议；显示与搜索优先命中备注。通讯录资料卡与私聊头部资料弹窗都复用 `peers:set-remark` 写入 peers 表，主进程随后推送 `peers:updated` 刷新会话、通讯录与搜索显示名。
 - `groups.creator_ip/admin_secret_hash/admin_hint` 为讨论组管理门槛（决议 #27/#30）：密码明文不入库；提示仅用于成员输入密码时展示，不参与鉴权；无密码组以创建 IP 作为管理来源限制。该机制服务于内网协作秩序，不替代加密/签名。
 - 中文搜索：FTS5 不会切中文词 → **入库时把 `text` 按字拆开以空格连接**写入 fts 表，查询同样按字拆 + `"…"` 短语匹配；文件名/联系人走 `LIKE %…%`（千级数据量足够）。会话内历史搜索固定带 `conv_id` 范围，直接在 `messages` 上按 `kind/content/file_ref/ts` 白名单条件查询：关键词匹配 `content` 与 `file_ref` 展示名，图片/文件/日期筛选只影响本地 SQLite 查询，不产生协议报文或数据库迁移；空关键词允许返回当前会话最近记录，仍受类型、日期与 limit 约束；图片/文件命中返回解析后的 `FileRefView`，渲染层仅用 `transferId` 走既有 `pantry-img://` 安全协议显示缩略图，不暴露本地保存路径。
 - 定时清理（启动 + 每小时）：`dedup` 超 24h、`send_queue` 超 7 天或单 peer 超 200 条（裁剪时回推 UI 标失败）；启动时将残留 `sending` 态消息复位为失败（可点重发），杜绝"永远转圈"。
@@ -246,3 +246,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.15 会话内历史搜索：IPC 增加 `msg:search`，由 `SearchService` 在当前会话范围内按关键词、图片、文件、日期范围查询 `messages`，结果复用既有 `msg:context` 跳转高亮。
 - 2026-06-12 v0.16 会话内历史搜索 UI 精修：`ConversationMessageHit` 对图片/文件结果携带 `fileRef`，图片缩略图复用 `pantry-img://transferId`，弹窗改为设置页尺度的大面板。
 - 2026-06-12 v0.17 会话内历史搜索默认展示：`msg:search` 允许空关键词返回当前会话最近记录，日期筛选由渲染层日历范围组件产生起止时间戳。
+- 2026-06-12 v0.18 私聊资料弹窗：私聊头部昵称区域打开资料弹窗，备注修改复用 `peers:set-remark`，不新增线上协议。
