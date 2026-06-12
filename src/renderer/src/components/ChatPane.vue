@@ -39,12 +39,14 @@ const loadingEarlier = ref(false)
 const scrollArea = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emojiScope = ref<HTMLElement | null>(null)
+const peerProfileScope = ref<HTMLElement | null>(null)
 const historySearchInput = ref<HTMLInputElement | null>(null)
 const msgMenu = ref<{ x: number; y: number; msg: MessageView } | null>(null)
 const forwardMsg = ref<MessageView | null>(null)
 const settings = ref<SettingsView | null>(null)
 let stopSettings: (() => void) | null = null
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
+let peerProfileSavedTimer: ReturnType<typeof setTimeout> | null = null
 let historySearchRun = 0
 const MSG_MENU_WIDTH = 112
 const MSG_MENU_ITEM_HEIGHT = 32
@@ -72,6 +74,10 @@ const historyCalendarMonth = ref(monthKey(new Date()))
 const historyHits = ref<ConversationMessageHit[]>([])
 const historySearching = ref(false)
 const historyBrokenImages = ref<Record<string, boolean>>({})
+const showPeerProfile = ref(false)
+const peerProfileRemark = ref('')
+const peerProfileSaving = ref(false)
+const peerProfileSaved = ref(false)
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -158,6 +164,7 @@ function onDocumentPointerDown(event: MouseEvent): void {
   const target = event.target
   if (!(target instanceof Node)) return
   if (showEmoji.value && !emojiScope.value?.contains(target)) showEmoji.value = false
+  if (showPeerProfile.value && !peerProfileScope.value?.contains(target)) closePeerProfile()
 }
 
 onMounted(async () => {
@@ -171,6 +178,7 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('mousedown', onDocumentPointerDown)
   if (historySearchTimer) clearTimeout(historySearchTimer)
+  if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
   historySearchRun += 1
   stopSettings?.()
 })
@@ -181,6 +189,7 @@ watch(
     showMembers.value = false
     showMentionPicker.value = false
     showHistorySearch.value = false
+    closePeerProfile()
     mentionIds.value = []
     resetHistorySearch()
     if (isGroup.value && id) void groupsStore.ensure(id)
@@ -189,6 +198,15 @@ watch(
 )
 
 watch([historyQuery, historyKind, historyFrom, historyTo], () => scheduleHistorySearch())
+
+watch(
+  () => [peer.value?.nodeId ?? '', peer.value?.remark ?? ''] as const,
+  () => {
+    if (showPeerProfile.value) return
+    peerProfileRemark.value = peer.value?.remark ?? ''
+    peerProfileSaved.value = false
+  }
+)
 
 function senderName(msg: MessageView): string {
   return peersStore.nameOf(msg.senderId)
@@ -282,6 +300,34 @@ function resetHistorySearch(): void {
   historyBrokenImages.value = {}
 }
 
+function closePeerProfile(): void {
+  showPeerProfile.value = false
+  peerProfileSaving.value = false
+  peerProfileSaved.value = false
+  if (peerProfileSavedTimer) {
+    clearTimeout(peerProfileSavedTimer)
+    peerProfileSavedTimer = null
+  }
+}
+
+function openPeerProfile(): void {
+  const current = peer.value
+  if (!current) return
+  showEmoji.value = false
+  closeHistorySearch()
+  peerProfileRemark.value = current.remark
+  peerProfileSaved.value = false
+  showPeerProfile.value = true
+}
+
+function togglePeerProfile(): void {
+  if (showPeerProfile.value) {
+    closePeerProfile()
+    return
+  }
+  openPeerProfile()
+}
+
 function closeHistorySearch(): void {
   showHistorySearch.value = false
   if (historySearchTimer) {
@@ -294,6 +340,7 @@ function closeHistorySearch(): void {
 }
 
 function toggleHistorySearch(): void {
+  closePeerProfile()
   showHistorySearch.value = !showHistorySearch.value
   if (!showHistorySearch.value) {
     closeHistorySearch()
@@ -359,6 +406,47 @@ function clearHistoryDateRange(): void {
   historyFrom.value = ''
   historyTo.value = ''
   historyCalendarMonth.value = monthKey(new Date())
+}
+
+function peerOrgPath(p: PeerView): string {
+  return [p.company, p.dept, p.team].filter(Boolean).join(' / ') || '未分组'
+}
+
+function peerPlatformLabel(platform: PeerView['platform']): string {
+  if (platform === 'win') return 'Windows'
+  if (platform === 'mac') return 'macOS'
+  return 'Linux'
+}
+
+function peerLastSeenLabel(p: PeerView): string {
+  if (p.online) return '当前在线'
+  if (!p.lastSeen) return '离线'
+  return listTime(p.lastSeen)
+}
+
+function peerProfileAvatarStyle(p: PeerView): { backgroundColor: string; color: string } {
+  return p.online
+    ? avatarStyle(p.avatar, p.remark || p.nick)
+    : { backgroundColor: 'var(--offline)', color: '#fff' }
+}
+
+async function savePeerProfileRemark(): Promise<void> {
+  const current = peer.value
+  if (!current || peerProfileSaving.value) return
+  const next = peerProfileRemark.value.trim()
+  peerProfileSaving.value = true
+  try {
+    await window.pantry.setPeerRemark(current.nodeId, next)
+    peerProfileRemark.value = next
+    peerProfileSaved.value = true
+    if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
+    peerProfileSavedTimer = setTimeout(() => {
+      peerProfileSaved.value = false
+      peerProfileSavedTimer = null
+    }, 1500)
+  } finally {
+    peerProfileSaving.value = false
+  }
 }
 
 function dayStart(value: string): number | undefined {
@@ -847,9 +935,70 @@ async function onDrop(event: DragEvent): Promise<void> {
     </div>
     <div v-if="dragging" class="drop-mask">松手发送给 {{ peerName }}</div>
     <header class="head">
-      <span class="title-block">
+      <div v-if="!isGroup && peer" ref="peerProfileScope" class="peer-profile-scope">
+        <button
+          class="title-button"
+          :class="{ active: showPeerProfile }"
+          type="button"
+          aria-label="查看对方资料"
+          @click.stop="togglePeerProfile"
+        >
+          <span class="title">{{ peerName }}</span>
+          <span v-if="peerIp" class="subtitle">{{ peerIp }}</span>
+        </button>
+        <section
+          v-if="showPeerProfile"
+          class="peer-profile-popover"
+          role="dialog"
+          aria-label="对方详细信息"
+          @click.stop
+          @keydown.esc.stop="closePeerProfile"
+        >
+          <header class="peer-profile-head">
+            <span class="profile-avatar" :style="peerProfileAvatarStyle(peer)">
+              {{ avatarText(peer.avatar, peer.remark || peer.nick) }}
+            </span>
+            <span class="profile-title">
+              <strong>{{ peer.remark || peer.nick }}</strong>
+              <small v-if="peer.remark">昵称：{{ peer.nick }}</small>
+              <small :class="{ on: peer.online }">{{ peer.online ? '● 在线' : '离线' }}</small>
+            </span>
+          </header>
+          <div class="profile-rows">
+            <div class="profile-row"><span>组织</span><strong>{{ peerOrgPath(peer) }}</strong></div>
+            <div class="profile-row"><span>IP</span><strong>{{ peer.ip || '未知' }}</strong></div>
+            <div class="profile-row"><span>主机</span><strong>{{ peer.host || '未知' }}</strong></div>
+            <div class="profile-row">
+              <span>平台</span><strong>{{ peerPlatformLabel(peer.platform) }}</strong>
+            </div>
+            <div class="profile-row">
+              <span>最近</span><strong>{{ peerLastSeenLabel(peer) }}</strong>
+            </div>
+          </div>
+          <label class="profile-remark">
+            <span>备注</span>
+            <input
+              v-model="peerProfileRemark"
+              maxlength="32"
+              placeholder="仅自己可见"
+              @keydown.enter="savePeerProfileRemark"
+            />
+          </label>
+          <div class="profile-actions">
+            <span class="profile-save-state">{{ peerProfileSaved ? '已保存' : '' }}</span>
+            <button
+              type="button"
+              class="profile-save"
+              :disabled="peerProfileSaving"
+              @click="savePeerProfileRemark"
+            >
+              {{ peerProfileSaving ? '保存中' : '保存备注' }}
+            </button>
+          </div>
+        </section>
+      </div>
+      <span v-else class="title-block">
         <span class="title">{{ peerName }}</span>
-        <span v-if="!isGroup && peerIp" class="subtitle">{{ peerIp }}</span>
       </span>
       <span v-if="isGroup" class="state">{{ group?.members.length ?? 0 }} 人</span>
       <span v-else class="state" :class="{ on: peerOnline }">{{
@@ -1642,10 +1791,183 @@ async function onDrop(event: DragEvent): Promise<void> {
   flex-direction: column;
   gap: 2px;
 }
+.title-block .title,
+.title-button .title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.peer-profile-scope {
+  position: relative;
+  min-width: 0;
+  max-width: 340px;
+  flex: 0 1 auto;
+}
+.title-button {
+  min-width: 0;
+  max-width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-left: -6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  cursor: pointer;
+}
+.title-button:hover,
+.title-button.active {
+  background: var(--line);
+}
 .subtitle {
   font-size: 11px;
   line-height: 1.2;
   color: var(--text-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.peer-profile-popover {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 9px);
+  width: 360px;
+  z-index: 22;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-window);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.18);
+}
+.peer-profile-popover::before {
+  content: '';
+  position: absolute;
+  left: 26px;
+  top: -6px;
+  width: 10px;
+  height: 10px;
+  background: var(--bg-window);
+  border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+.peer-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.profile-avatar {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 20px;
+  flex: 0 0 46px;
+}
+.profile-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.profile-title strong {
+  min-width: 0;
+  color: var(--text-1);
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-title small {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.profile-title small.on {
+  color: var(--online);
+}
+.profile-rows {
+  padding: 10px 0 8px;
+}
+.profile-row {
+  min-height: 26px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.profile-row span {
+  color: var(--text-3);
+}
+.profile-row strong {
+  min-width: 0;
+  color: var(--text-1);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-remark {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 12px;
+}
+.profile-remark input {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-list);
+  color: var(--text-1);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 9px;
+  outline: none;
+  user-select: text;
+}
+.profile-remark input:focus {
+  border-color: rgba(61, 139, 107, 0.55);
+  background: var(--bg-window);
+}
+.profile-actions {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+.profile-save-state {
+  color: var(--online);
+  font-size: 12px;
+}
+.profile-save {
+  min-width: 76px;
+  height: 30px;
+  border: none;
+  border-radius: 4px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+.profile-save:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .state {
   font-size: 12px;
