@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import type {
-  AppInfo,
-  AppSettingsPatch,
-  ConversationView,
-  DataExportOptions,
-  SettingsView,
-  TransferView
+import {
+  DEFAULT_CAPTURE_SHORTCUT,
+  DEFAULT_SHOWHIDE_SHORTCUT,
+  type AppInfo,
+  type AppSettingsPatch,
+  type ConversationView,
+  type DataExportOptions,
+  type SettingsView,
+  type TransferView
 } from '../../shared/ipc'
 import { DEFAULT_TCP_PORT, DEFAULT_UDP_PORT } from '../../shared/protocol'
 import { applyAppearance } from './utils/appearance'
@@ -237,8 +239,8 @@ async function resetAppSettings(): Promise<void> {
       showMessagePreview: true,
       sound: 'none',
       sendKey: 'enter',
-      captureShortcut: 'CommandOrControl+Alt+A',
-      showHideShortcut: 'CommandOrControl+Alt+P'
+      captureShortcut: DEFAULT_CAPTURE_SHORTCUT,
+      showHideShortcut: DEFAULT_SHOWHIDE_SHORTCUT
     },
     '应用设置已重置'
   )
@@ -252,6 +254,67 @@ async function saveShortcuts(): Promise<void> {
     },
     '快捷键已保存'
   )
+}
+
+async function resetShortcuts(): Promise<void> {
+  captureShortcut.value = DEFAULT_CAPTURE_SHORTCUT
+  showHideShortcut.value = DEFAULT_SHOWHIDE_SHORTCUT
+  await saveApp(
+    {
+      captureShortcut: DEFAULT_CAPTURE_SHORTCUT,
+      showHideShortcut: DEFAULT_SHOWHIDE_SHORTCUT
+    },
+    '已恢复默认快捷键'
+  )
+}
+
+// ---- 录制式快捷键输入（决议 #57）：聚焦后直接按组合键，Esc/退格清空 = 禁用 ----
+
+const recordingShortcut = ref<'capture' | 'showHide' | null>(null)
+
+/** e.code → Electron accelerator 主键名；仅收常用且 normalizeShortcut 白名单内的键 */
+function mainKeyOf(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3)
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5)
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code
+  const map: Record<string, string> = {
+    Space: 'Space',
+    ArrowUp: 'Up',
+    ArrowDown: 'Down',
+    ArrowLeft: 'Left',
+    ArrowRight: 'Right',
+    Home: 'Home',
+    End: 'End',
+    PageUp: 'PageUp',
+    PageDown: 'PageDown',
+    Minus: '-'
+  }
+  return map[code] ?? null
+}
+
+function onShortcutKeydown(event: KeyboardEvent, target: 'capture' | 'showHide'): void {
+  event.preventDefault()
+  event.stopPropagation()
+  const model = target === 'capture' ? captureShortcut : showHideShortcut
+  if (event.key === 'Escape' || event.key === 'Backspace' || event.key === 'Delete') {
+    model.value = ''
+    return
+  }
+  const mods: string[] = []
+  if (event.ctrlKey || event.metaKey) mods.push('CommandOrControl')
+  if (event.altKey) mods.push('Alt')
+  if (event.shiftKey) mods.push('Shift')
+  const key = mainKeyOf(event.code)
+  // 全局快捷键必须带修饰键，避免吞掉普通按键
+  if (!key || mods.length === 0) return
+  model.value = [...mods, key].join('+')
+}
+
+/** accelerator → 给用户看的组合（存储仍是 accelerator 原文） */
+function shortcutLabel(acc: string): string {
+  if (!acc.trim()) return ''
+  const mod = info.value?.platform === 'darwin' ? '⌘' : 'Ctrl'
+  return acc.replace('CommandOrControl', mod).replace(/\+/g, ' + ')
 }
 
 async function savePorts(): Promise<void> {
@@ -789,15 +852,47 @@ async function removeRange(cidr: string): Promise<void> {
           <div class="panel">
             <div class="panel-head">
               <h2>全局快捷键</h2>
-              <p>留空表示禁用。保存后会立即重新注册快捷键。</p>
+              <p>点击输入框后直接按下组合键（需包含 Ctrl/Alt 等修饰键）；Esc 或退格清空表示禁用。</p>
             </div>
             <label class="field">
               <span>截图</span>
-              <input v-model="captureShortcut" maxlength="64" placeholder="留空禁用" />
+              <input
+                class="shortcut-input"
+                :class="{ recording: recordingShortcut === 'capture' }"
+                :value="
+                  recordingShortcut === 'capture' && !captureShortcut
+                    ? ''
+                    : shortcutLabel(captureShortcut)
+                "
+                :placeholder="recordingShortcut === 'capture' ? '按下新组合键…' : '未设置（已禁用）'"
+                readonly
+                @focus="recordingShortcut = 'capture'"
+                @blur="recordingShortcut = null"
+                @keydown="onShortcutKeydown($event, 'capture')"
+              />
+              <small v-if="settings.shortcutStatus && !settings.shortcutStatus.capture" class="shortcut-warn">
+                注册失败：组合键可能已被系统或其他程序占用（如 UOS 系统截图），请换一个组合后保存。
+              </small>
             </label>
             <label class="field">
               <span>显示/隐藏主窗</span>
-              <input v-model="showHideShortcut" maxlength="64" placeholder="留空禁用" />
+              <input
+                class="shortcut-input"
+                :class="{ recording: recordingShortcut === 'showHide' }"
+                :value="
+                  recordingShortcut === 'showHide' && !showHideShortcut
+                    ? ''
+                    : shortcutLabel(showHideShortcut)
+                "
+                :placeholder="recordingShortcut === 'showHide' ? '按下新组合键…' : '未设置（已禁用）'"
+                readonly
+                @focus="recordingShortcut = 'showHide'"
+                @blur="recordingShortcut = null"
+                @keydown="onShortcutKeydown($event, 'showHide')"
+              />
+              <small v-if="settings.shortcutStatus && !settings.shortcutStatus.showHide" class="shortcut-warn">
+                注册失败：组合键可能已被系统或其他程序占用，请换一个组合后保存。
+              </small>
             </label>
             <div class="setting-line">
               <div>
@@ -810,6 +905,7 @@ async function removeRange(cidr: string): Promise<void> {
               </label>
             </div>
             <div class="panel-actions">
+              <button class="ghost" @click="resetShortcuts">恢复默认</button>
               <button class="primary" @click="saveShortcuts">保存快捷键</button>
             </div>
           </div>
@@ -1177,6 +1273,23 @@ async function removeRange(cidr: string): Promise<void> {
 
 .path {
   overflow-wrap: anywhere;
+}
+
+/* 录制式快捷键输入（决议 #57） */
+.shortcut-input {
+  cursor: pointer;
+  caret-color: transparent;
+}
+
+.shortcut-input.recording {
+  border-color: var(--primary);
+  background: var(--primary-weak);
+}
+
+.shortcut-warn {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 /* 头像编辑器（决议 #50）：预览与样式切换同行，图标网格与色板全宽分节 */

@@ -18,6 +18,8 @@ import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'no
 import { randomUUID } from 'node:crypto'
 import { basename, extname, join, resolve } from 'node:path'
 import {
+  DEFAULT_CAPTURE_SHORTCUT,
+  DEFAULT_SHOWHIDE_SHORTCUT,
   IpcChannels,
   IpcEvents,
   type AppInfo,
@@ -224,20 +226,33 @@ if (!gotLock) {
     return out
   }
 
+  /** 全局快捷键注册结果（决议 #57）：随 SettingsView 回传，设置页据此提示"被系统占用" */
+  const shortcutStatus = { capture: true, showHide: true }
+
+  function tryRegisterShortcut(accelerator: string, handler: () => void, label: string): boolean {
+    try {
+      const ok = globalShortcut.register(accelerator, handler)
+      if (!ok) console.warn(`[shortcut] ${label}快捷键注册失败（可能被系统占用）：`, accelerator)
+      return ok
+    } catch {
+      // 非法 accelerator（手填旧配置/导入数据）不致命，按注册失败处理
+      console.warn(`[shortcut] ${label}快捷键格式无效：`, accelerator)
+      return false
+    }
+  }
+
   function registerGlobalShortcuts(): void {
     const cfg = appState?.config
     if (!cfg) return
     globalShortcut.unregisterAll()
     const captureShortcut = cfg.captureShortcut.trim()
-    if (captureShortcut) {
-      const ok = globalShortcut.register(captureShortcut, () => void startCapture())
-      if (!ok) console.warn('[shortcut] 截图快捷键注册失败：', captureShortcut)
-    }
+    shortcutStatus.capture = captureShortcut
+      ? tryRegisterShortcut(captureShortcut, () => void startCapture(), '截图')
+      : true
     const showHideShortcut = cfg.showHideShortcut.trim()
-    if (showHideShortcut) {
-      const ok = globalShortcut.register(showHideShortcut, () => toggleMainWindow())
-      if (!ok) console.warn('[shortcut] 显示/隐藏快捷键注册失败：', showHideShortcut)
-    }
+    shortcutStatus.showHide = showHideShortcut
+      ? tryRegisterShortcut(showHideShortcut, () => toggleMainWindow(), '显示/隐藏')
+      : true
   }
 
   function applyAutoLaunch(enabled: boolean): void {
@@ -753,8 +768,9 @@ if (!gotLock) {
       showMessagePreview: c?.showMessagePreview !== false,
       sound,
       sendKey: c?.sendKey === 'ctrlEnter' ? 'ctrlEnter' : 'enter',
-      captureShortcut: c?.captureShortcut ?? 'CommandOrControl+Alt+A',
-      showHideShortcut: c?.showHideShortcut ?? 'CommandOrControl+Alt+P'
+      captureShortcut: c?.captureShortcut ?? DEFAULT_CAPTURE_SHORTCUT,
+      showHideShortcut: c?.showHideShortcut ?? DEFAULT_SHOWHIDE_SHORTCUT,
+      shortcutStatus: { ...shortcutStatus }
     }
   }
 
