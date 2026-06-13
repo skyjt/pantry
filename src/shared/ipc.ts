@@ -93,6 +93,10 @@ export const IpcEvents = {
   winMaximizeChanged: 'win:maximized-changed'
 } as const
 
+/** 全局快捷键出厂默认（决议 #57）：设置页"恢复默认"与主进程默认值的唯一来源 */
+export const DEFAULT_CAPTURE_SHORTCUT = 'CommandOrControl+Alt+A'
+export const DEFAULT_SHOWHIDE_SHORTCUT = 'CommandOrControl+Alt+P'
+
 export interface AppInfo {
   version: string
   electron: string
@@ -313,6 +317,11 @@ export interface SettingsView {
   captureShortcut: string
   /** Electron accelerator；空串 = 禁用 */
   showHideShortcut: string
+  /** 全局快捷键注册结果（决议 #57）：false = 被系统占用注册失败；禁用（空串）视为 true */
+  shortcutStatus: {
+    capture: boolean
+    showHide: boolean
+  }
 }
 
 export interface AppSettingsPatch {
