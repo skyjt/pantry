@@ -1,7 +1,7 @@
 {
   "name": "pantry",
   "productName": "茶话间",
-  "version": "0.5.23",
+  "version": "0.5.24",
   "description": "茶话间（Pantry）—— 纯内网、基于 IP 的局域网即时通讯与文件传输工具",
   "private": true,
   "main": "./out/main/index.js",
@@ -29,12 +29,12 @@
     "test:db": "esbuild src/main/store/db-selftest.ts --bundle --platform=node --target=node16 --external:better-sqlite3 --outfile=out/db-selftest.cjs --log-level=warning && cross-env ELECTRON_RUN_AS_NODE=1 electron out/db-selftest.cjs",
     "smoke": "npm run build && cross-env PANTRY_SMOKE=1 electron .",
     "dist:win": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --win --x64 --publish never",
-    "dist:linux": "npm run build && cross-env npm_config_build_from_source=true NO_UPDATE_NOTIFIER=1 npm run rebuild:electron && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --linux --x64 --publish never",
+    "dist:linux": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 USE_HARD_LINKS=false electron-builder --linux --x64 --publish never",
     "dist:mac": "npm run build && cross-env NO_UPDATE_NOTIFIER=1 electron-builder --mac --publish never"
   },
   "build": {
     "appId": "com.pantry.app",
-    "productName": "茶话间",
+    "productName": "Pantry",
     "electronVersion": "22.3.27",
     "npmRebuild": false,
     "asar": true,
@@ -71,7 +71,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "artifactName": "Pantry-${version}-win-${arch}-setup.${ext}"
+      "artifactName": "Pantry-${version}-win-${arch}-setup.${ext}",
+      "shortcutName": "茶话间"
     },
     "portable": {
       "artifactName": "Pantry-${version}-win-${arch}-portable.${ext}"
@@ -96,7 +97,8 @@
       "category": "Network",
       "artifactName": "Pantry-${version}-${os}-${arch}.${ext}",
       "desktop": {
-        "StartupWMClass": "pantry"
+        "StartupWMClass": "pantry",
+        "Name": "茶话间"
       }
     },
     "deb": {
@@ -117,11 +119,15 @@
         "dmg",
         "zip"
       ],
-      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}"
+      "artifactName": "Pantry-${version}-${os}-${arch}.${ext}",
+      "extendInfo": {
+        "CFBundleDisplayName": "茶话间",
+        "CFBundleName": "茶话间"
+      }
     },
     "extraResources": [
       {
-        "from": "build/icons/linux/256x256.png",
+        "from": "build/icons/window-icon.png",
         "to": "icons/pantry.png"
       }
     ]
