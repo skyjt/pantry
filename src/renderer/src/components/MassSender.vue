@@ -4,6 +4,10 @@ import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
 import { TEXT_TCP_LIMIT, TEXT_UDP_LIMIT } from '../../../shared/protocol'
 
+// ⚠️ 已停用（决议 #62，2026-06-13）：群发功能取消——建讨论组即可满足同样诉求，
+// 群发（拆成多个单聊逐发）无实际意义。本组件已无任何引用（App.vue 入口已注释），
+// 保留全文留痕，便于日后需要时恢复。请勿在新代码中重新挂载。
+//
 // 多选收件人群发（requirements 决议 #3）：拆成多个单聊上下文发送，不引入群发协议。
 
 const emit = defineEmits<{ close: [] }>()

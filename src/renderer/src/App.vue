@@ -10,7 +10,8 @@ import SetupWizard from './components/SetupWizard.vue'
 import SearchPanel from './components/SearchPanel.vue'
 import ProfileCard from './components/ProfileCard.vue'
 import GroupCreator from './components/GroupCreator.vue'
-import MassSender from './components/MassSender.vue'
+// 群发功能已停用（决议 #62）：建讨论组即可满足同样诉求，群发无实际意义；保留代码留痕。
+// import MassSender from './components/MassSender.vue'
 import PantryIcon from './components/PantryIcon.vue'
 import PantryBrandLogo from './components/PantryBrandLogo.vue'
 import WindowControls from './components/WindowControls.vue'
@@ -26,7 +27,7 @@ const tab = ref<Tab>('chat')
 const searchQuery = ref('')
 const selectedPeerId = ref<string | null>(null)
 const showGroupCreator = ref(false)
-const showMassSender = ref(false)
+// const showMassSender = ref(false) // 群发已停用（决议 #62）
 const groupsStore = useGroupsStore()
 
 const selectedPeer = computed<PeerView | null>(() =>
@@ -125,15 +126,17 @@ onUnmounted(() => {
             <PantryIcon name="x" :size="13" />
           </button>
         </div>
+        <!-- 群发入口已停用（决议 #62）：直接建讨论组即可，群发无意义；保留留痕
         <button class="new-group" title="群发消息" @click="showMassSender = true">
           <PantryIcon name="send-many" :size="16" />
         </button>
+        -->
         <button class="new-group" title="发起讨论组" @click="showGroupCreator = true">
           <PantryIcon name="plus" :size="17" />
         </button>
       </div>
       <GroupCreator v-if="showGroupCreator" @close="showGroupCreator = false" />
-      <MassSender v-if="showMassSender" @close="showMassSender = false" />
+      <!-- <MassSender v-if="showMassSender" @close="showMassSender = false" /> 群发已停用（决议 #62） -->
       <SearchPanel
         v-if="searchQuery.trim()"
         :query="searchQuery.trim()"
