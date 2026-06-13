@@ -175,6 +175,8 @@ export interface TransferView {
   transferId: string
   msgId: string
   convId: string
+  /** 对端节点 id：出站=接收人，入站=发送人（群聊文件接收名单用，决议 #75） */
+  peerId: string
   direction: 'in' | 'out'
   status: 'offering' | 'accepted' | 'done' | 'declined' | 'canceled' | 'failed'
   bytesDone: number

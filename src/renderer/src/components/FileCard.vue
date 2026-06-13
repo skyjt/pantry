@@ -2,13 +2,15 @@
 import { computed, onMounted } from 'vue'
 import type { MessageView, TransferView } from '../../../shared/ipc'
 import { fmtBytes, useTransfersStore } from '../stores/transfers'
-import PantryIcon from './PantryIcon.vue'
+import { usePeersStore } from '../stores/peers'
+import FileTypeIcon from './FileTypeIcon.vue'
 
 // 文件消息卡片（ui-design §5）：等待对方接收 → 传输中（进度+速率+取消）
 // → 已完成（打开所在文件夹）→ 已取消 / 已拒收 / 失败
 
 const props = defineProps<{ msg: MessageView }>()
 const transfers = useTransfersStore()
+const peersStore = usePeersStore()
 
 const ref_ = computed(() => props.msg.fileRef)
 const transferIds = computed(() => {
@@ -26,6 +28,12 @@ const multiOut = computed(
 )
 const multiActive = computed(
   () => multiOut.value && transferList.value.some((t) => t.status === 'offering' || t.status === 'accepted')
+)
+// 群聊文件接收名单（决议 #75）：x/x 计数 + 已接收成员名（备注优先）
+const totalCount = computed(() => transferIds.value.length)
+const doneCount = computed(() => transferList.value.filter((t) => t.status === 'done').length)
+const receivedNames = computed(() =>
+  transferList.value.filter((t) => t.status === 'done').map((t) => peersStore.nameOf(t.peerId))
 )
 const percent = computed(() => {
   const list = multiOut.value ? transferList.value : transfer.value ? [transfer.value] : []
@@ -46,10 +54,10 @@ const statusText = computed(() => {
       t.status === 'failed' || t.status === 'declined' || t.status === 'canceled'
     ).length
     const active = list.some((t) => t.status === 'accepted')
-    if (done === total) return '已完成'
-    if (active) return `${done} / ${total} 位完成 · ${fmtBytes(speed.value)}/s`
+    if (done === total) return '已全部送达'
+    if (active) return `传输中 · ${fmtBytes(speed.value)}/s`
     if (failed === total && total > 0) return '传输失败'
-    if (failed > 0) return `${done} / ${total} 位完成，${failed} 位未完成`
+    if (failed > 0) return `${failed} 位未完成`
     return `等待 ${total} 位成员接收`
   }
   const t = transfer.value
@@ -82,15 +90,22 @@ function cancelActiveTransfers(): void {
 <template>
   <div v-if="ref_" class="card" :class="transfer?.status">
     <div class="icon">
-      <PantryIcon :name="ref_.dir ? 'folder' : 'file'" :size="28" />
+      <FileTypeIcon :name="ref_.name" :dir="ref_.dir" :size="36" />
     </div>
     <div class="info">
       <div class="name" :title="ref_.name">{{ ref_.name }}</div>
       <div class="meta">
         {{ fmtBytes(ref_.size) }}<span v-if="ref_.count > 1"> · {{ ref_.count }} 个文件</span>
       </div>
-      <div v-if="transfer?.status === 'accepted' || multiOut" class="bar">
+      <div v-if="transfer?.status === 'accepted' && !multiOut" class="bar">
         <div class="fill" :style="{ width: `${percent}%` }"></div>
+      </div>
+      <div v-if="multiOut" class="recv">
+        <span class="recv-count">已接收 {{ doneCount }}/{{ totalCount }}</span>
+        <span class="recv-pop" role="tooltip">
+          <template v-if="receivedNames.length">{{ receivedNames.join('、') }}</template>
+          <template v-else>还没有人接收</template>
+        </span>
       </div>
       <div class="state" :class="transfer?.status">{{ statusText }}</div>
     </div>
@@ -178,6 +193,39 @@ function cancelActiveTransfers(): void {
   font-size: 11px;
   color: var(--text-3);
   margin-top: 4px;
+}
+.recv {
+  position: relative;
+  display: inline-block;
+  margin-top: 6px;
+}
+.recv-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  border-bottom: 1px dashed currentColor;
+  cursor: default;
+}
+.recv-pop {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 120px;
+  max-width: 220px;
+  padding: 7px 10px;
+  background: var(--bg-window);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-1);
+  white-space: normal;
+  z-index: 8;
+}
+.recv:hover .recv-pop {
+  display: block;
 }
 .state.done {
   color: var(--online);

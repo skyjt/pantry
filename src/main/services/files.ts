@@ -535,6 +535,7 @@ export class FilesService extends EventEmitter {
       transferId,
       msgId: row.msg_id,
       convId: msg?.conv_id ?? '',
+      peerId: row.peer_id,
       direction: row.direction === 'out' ? 'out' : 'in',
       status: row.status as TransferView['status'],
       bytesDone: live ?? row.bytes_done,
