@@ -224,6 +224,7 @@ onUnmounted(() => {
   document.removeEventListener('mousedown', onDocumentPointerDown)
   if (historySearchTimer) clearTimeout(historySearchTimer)
   if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
+  if (recallCountdownTimer) clearInterval(recallCountdownTimer)
   historySearchRun += 1
   stopSettings?.()
 })
@@ -695,6 +696,41 @@ function canRecallMessage(msg: MessageView): boolean {
   return Date.now() - msg.ts <= RECALL_WINDOW_MS
 }
 
+/** 撤回项是否出现在右键菜单（不含时间判断）：超时也显示，变灰提示"超时"（决议 #63） */
+function isRecallableKind(msg: MessageView): boolean {
+  return msg.isMine && msg.kind === 'text' && msg.status !== 'recalled'
+}
+
+// 撤回倒计时（决议 #63）：菜单打开时每 500ms 刷新 nowTs，驱动"撤回（mm:ss）"实时递减
+const nowTs = ref(Date.now())
+let recallCountdownTimer: ReturnType<typeof setInterval> | null = null
+const recallRemainingMs = computed(() => {
+  const msg = msgMenu.value?.msg
+  if (!msg) return 0
+  return Math.max(0, RECALL_WINDOW_MS - (nowTs.value - msg.ts))
+})
+const recallExpired = computed(() => recallRemainingMs.value <= 0)
+const recallButtonLabel = computed(() => {
+  if (recallExpired.value) return '撤回（超时）'
+  const totalSec = Math.ceil(recallRemainingMs.value / 1000)
+  const mm = String(Math.floor(totalSec / 60)).padStart(2, '0')
+  const ss = String(totalSec % 60).padStart(2, '0')
+  return `撤回（${mm}:${ss}）`
+})
+watch(
+  () => msgMenu.value?.msg.id,
+  (id) => {
+    if (recallCountdownTimer) {
+      clearInterval(recallCountdownTimer)
+      recallCountdownTimer = null
+    }
+    if (id) {
+      nowTs.value = Date.now()
+      recallCountdownTimer = setInterval(() => (nowTs.value = Date.now()), 500)
+    }
+  }
+)
+
 function canForwardMessage(msg: MessageView): boolean {
   return msg.status !== 'recalled' && msg.kind !== 'system'
 }
@@ -703,7 +739,7 @@ function messageMenuItemCount(msg: MessageView): number {
   return (
     Number(canCopyMessage(msg)) +
     Number(canForwardMessage(msg)) +
-    Number(canRecallMessage(msg))
+    Number(isRecallableKind(msg))
   )
 }
 
@@ -1149,8 +1185,13 @@ async function onDrop(event: DragEvent): Promise<void> {
     >
       <button v-if="canCopyMessage(msgMenu.msg)" @click="copySelectedMessage">复制</button>
       <button v-if="canForwardMessage(msgMenu.msg)" @click="forwardSelectedMessage">转发</button>
-      <button v-if="canRecallMessage(msgMenu.msg)" class="danger" @click="recallSelectedMessage">
-        撤回
+      <button
+        v-if="isRecallableKind(msgMenu.msg)"
+        class="danger"
+        :disabled="recallExpired"
+        @click="recallSelectedMessage"
+      >
+        {{ recallButtonLabel }}
       </button>
     </div>
 
@@ -2211,6 +2252,13 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .msg-menu button.danger {
   color: var(--danger);
+}
+.msg-menu button:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.msg-menu button:disabled:hover {
+  background: transparent;
 }
 .spin {
   display: inline-block;
