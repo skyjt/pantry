@@ -69,6 +69,10 @@ if ((process.platform === 'win32' && release().startsWith('6.1')) || process.pla
   app.disableHardwareAcceleration()
 }
 
+// 纯内网 IP 工具：全局禁用代理、强制直连（决议 #78）。不走系统/环境代理，
+// 也不开放任何代理配置——代理对内网通信无意义，只会增加连接失败与信息泄漏面。
+app.commandLine.appendSwitch('no-proxy-server')
+
 // 运行时应用名固定为中文（决议 #60）：productName 已改 ASCII "Pantry" 以保证
 // 安装路径无中文（/opt/Pantry 等），但 userData 目录（已有用户数据所在）与
 // 系统通知标题必须保持「茶话间」——setName 必须在任何 getPath('userData') 之前。
