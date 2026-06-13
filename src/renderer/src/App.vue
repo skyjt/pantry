@@ -175,12 +175,13 @@ onUnmounted(() => {
 
 /* 栏① 导航 */
 .rail {
-  width: 56px;
+  /* 68px 容纳标准 mac 红绿灯（决议 #68）：红绿灯回左上角导航栏顶部留白、不横跨列表栏 */
+  width: 68px;
   background: var(--primary);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 34px 0 12px; /* 顶部让出拖拽带与 mac 红绿灯 */
+  padding: 38px 0 12px; /* 顶部让出拖拽带与 mac 红绿灯 */
   gap: 8px;
 }
 .avatar {
