@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { GroupView } from '../../../shared/ipc'
 import { usePeersStore } from '../stores/peers'
 import PantryIcon from './PantryIcon.vue'
+import AvatarMark from './AvatarMark.vue'
 
 // 群成员面板（ui-design §5）：成员列表 / 移除 / 添加 / 改名 / 退出。
 // 改名/增删人按决议 #27 走管理密码或创建 IP 校验；退出始终允许本人操作。
@@ -109,7 +110,12 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
     <div v-if="adminTip" class="admin-tip">{{ adminTip }}</div>
     <ul class="members">
       <li v-for="id in group.members" :key="id">
-        <span class="dot" :class="peersStore.byId(id)?.online || id === selfId ? 'on' : 'off'"></span>
+        <AvatarMark
+          class="m-avatar"
+          :avatar="peersStore.byId(id)?.avatar ?? -1"
+          :name="nameOf(id)"
+          :offline="!(peersStore.byId(id)?.online || id === selfId)"
+        />
         <span class="nm">{{ nameOf(id) }}</span>
         <button
           v-if="canShowAdmin && id !== selfId"
@@ -128,7 +134,7 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
       </button>
       <ul v-if="adding" class="members addlist">
         <li v-for="p in addable" :key="p.nodeId" class="addable" @click="addMember(p.nodeId)">
-          <span class="dot" :class="p.online ? 'on' : 'off'"></span>
+          <AvatarMark class="m-avatar" :avatar="p.avatar" :name="p.remark || p.nick" :offline="!p.online" />
           <span class="nm">{{ p.remark || p.nick }}</span>
           <PantryIcon class="plus" name="plus" :size="13" />
         </li>
@@ -141,13 +147,21 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
 </template>
 
 <style scoped>
+/* 覆盖右侧一整列（决议 #67）：绝对定位相对 .chat，从顶到底，盖在消息之上不挤压；
+   顶部留 32px 让出沉浸式拖拽带 */
 .panel {
-  width: 220px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 248px;
   border-left: 1px solid var(--line);
   background: var(--bg-window);
+  box-shadow: -10px 0 28px rgba(0, 0, 0, 0.12);
+  z-index: 26;
   display: flex;
   flex-direction: column;
-  padding: 12px;
+  padding: 40px 12px 12px;
   gap: 8px;
 }
 .head {
@@ -204,14 +218,20 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
 .members {
   list-style: none;
   overflow-y: auto;
-  flex-shrink: 1;
+  flex: 1;
 }
 .members li {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 2px;
+  padding: 4px 2px;
   font-size: 13px;
+}
+.m-avatar {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  font-size: 12px;
 }
 .dot {
   width: 7px;

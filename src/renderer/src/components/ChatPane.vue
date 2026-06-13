@@ -1086,6 +1086,14 @@ async function onDrop(event: DragEvent): Promise<void> {
       </button>
     </header>
 
+    <!-- 群信息面板（决议 #67）：绝对定位覆盖右侧一整列，不挤压消息 -->
+    <GroupPanel
+      v-if="isGroup && showMembers && group"
+      :group="group"
+      :self-id="chatStore.selfId"
+      @close="showMembers = false"
+    />
+
     <div class="body-wrap">
       <div ref="scrollArea" class="msgs" @scroll="onScroll">
       <div v-if="loadingEarlier" class="sep">加载更早的消息…</div>
@@ -1165,12 +1173,6 @@ async function onDrop(event: DragEvent): Promise<void> {
         </div>
       </template>
       </div>
-      <GroupPanel
-        v-if="isGroup && showMembers && group"
-        :group="group"
-        :self-id="chatStore.selfId"
-        @close="showMembers = false"
-      />
     </div>
 
     <button v-if="chatStore.viewingHistory" class="back-latest" @click="chatStore.backToLatest()">
