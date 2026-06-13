@@ -73,6 +73,9 @@ if ((process.platform === 'win32' && release().startsWith('6.1')) || process.pla
 // 安装路径无中文（/opt/Pantry 等），但 userData 目录（已有用户数据所在）与
 // 系统通知标题必须保持「茶话间」——setName 必须在任何 getPath('userData') 之前。
 app.setName('茶话间')
+// Windows 通知/任务栏归属名（决议 #66）：不设则 Win10/11 的 toast 顶部显示默认
+// "electron.app.Pantry"；设为 appId，与 NSIS 安装的快捷方式 AUMID 一致，显示为「茶话间」。
+if (process.platform === 'win32') app.setAppUserModelId('com.pantry.app')
 
 // 本机双实例联调：PANTRY_USER_DATA 隔离数据目录（同时绕开单实例锁），见 README「开发」
 if (process.env['PANTRY_USER_DATA']) {
@@ -521,17 +524,29 @@ if (!gotLock) {
     if (mainWindow && mainWindow.isFocused() && mainWindow.isVisible()) return
     if (!Notification.isSupported()) return
 
-    const nick = registry?.get(msg.senderId)?.profile.nick ?? '新消息'
-    const title = msg.mentioned ? `${nick} @了你` : nick
-    const preview =
-      appState?.config.showMessagePreview === false
-        ? '收到一条新消息'
-        : msg.text.length > 60
-          ? `${msg.text.slice(0, 60)}…`
-          : msg.text
+    const senderNick = registry?.get(msg.senderId)?.profile.nick ?? '新成员'
+    const hidePreview = appState?.config.showMessagePreview === false
+    const previewText = hidePreview
+      ? '收到一条新消息'
+      : msg.text.length > 60
+        ? `${msg.text.slice(0, 60)}…`
+        : msg.text
+
+    // 群消息：标题=群名，正文=「发送人：内容」（微信式，决议 #66）；单聊：标题=发送人昵称
+    const isGroup = msg.convId.startsWith('group:')
+    let title: string
+    let body: string
+    if (isGroup) {
+      const groupName = groups?.get(msg.convId.slice(6))?.name ?? '讨论组'
+      title = msg.mentioned ? `${groupName}（有人@你）` : groupName
+      body = `${senderNick}：${previewText}`
+    } else {
+      title = senderNick
+      body = previewText
+    }
     const notification = new Notification({
       title,
-      body: preview,
+      body,
       silent: appState?.config.sound === 'none'
     })
     notification.on('click', () => {
