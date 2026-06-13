@@ -67,10 +67,33 @@ jobs:
           xvfb-run -a npm run smoke -- --no-sandbox
 
       - name: 构建 Debian 10 / UOS 20 x64 产物
+        env:
+          # 决议 #60：禁用打包硬链接优化 —— deb 归档内跨 /usr 与 /opt 的硬链接
+          # 条目会让 UOS 深度安装器解包失败（"断开的管道"）。
+          USE_HARD_LINKS: "false"
         run: npm run dist:linux
 
       - name: 校验 Linux 打包 native 模块 glibc 基线
         run: node scripts/check-native-glibc.cjs
+
+      - name: 校验 deb 归档无硬链接且安装路径无中文（决议 #60）
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb=$(ls release/Pantry-*-linux-amd64.deb)
+          mkdir -p /tmp/deb-verify
+          data=$(ar t "$deb" | grep '^data\.tar')
+          ar p "$deb" "$data" > "/tmp/deb-verify/$data"
+          listing=$(tar -tvf "/tmp/deb-verify/$data")
+          if grep -P '^h' <<< "$listing"; then
+            echo "deb 内含硬链接条目，UOS 深度安装器会失败" >&2
+            exit 1
+          fi
+          if grep -P '[\x{4e00}-\x{9fff}]' <<< "$listing"; then
+            echo "deb 安装路径含中文" >&2
+            exit 1
+          fi
+          echo "deb 校验通过：无硬链接、无中文路径"
 
       - name: 生成 SHA-256 清单
         shell: bash

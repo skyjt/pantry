@@ -68,6 +68,11 @@ if ((process.platform === 'win32' && release().startsWith('6.1')) || process.pla
   app.disableHardwareAcceleration()
 }
 
+// 运行时应用名固定为中文（决议 #60）：productName 已改 ASCII "Pantry" 以保证
+// 安装路径无中文（/opt/Pantry 等），但 userData 目录（已有用户数据所在）与
+// 系统通知标题必须保持「茶话间」——setName 必须在任何 getPath('userData') 之前。
+app.setName('茶话间')
+
 // 本机双实例联调：PANTRY_USER_DATA 隔离数据目录（同时绕开单实例锁），见 README「开发」
 if (process.env['PANTRY_USER_DATA']) {
   app.setPath('userData', resolve(process.env['PANTRY_USER_DATA']))

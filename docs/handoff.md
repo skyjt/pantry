@@ -1,7 +1,7 @@
 # 茶话间（Pantry）开发交接文档
 
 > 给接手本项目的任何 AI 代理或开发者。读完本文 + [AGENTS.md](../AGENTS.md) 即可无缝继续开发。
-> 最后更新：2026-06-13（v0.5.23，第三十二轮决议 #56–#59：输入框 emoji 等宽空白字形字体 `PantryEmojiBlank`（对齐/重叠矛盾终结）；快捷键录制式设置 + 注册状态反馈 + 恢复默认；Linux 多尺寸桌面图标 / 窗口显式 icon / Win·Linux 彩色托盘；win:close IPC 修复关闭未进托盘——渲染层严禁 DOM window.close()。仍遵守决议 #53，每个增量 commit 必须 patch +1）。**本文描述"当前状态与下一步"，会过期——以 `git log` 与各文档变更记录为准。**
+> 最后更新：2026-06-13（v0.5.24，决议 #60：productName 改 ASCII `Pantry`——安装路径无中文（/opt/Pantry），显示名与 userData 经 desktop Name / shortcutName / extendInfo / `app.setName('茶话间')` 保持中文、用户数据零迁移；Linux 打包强制 `USE_HARD_LINKS=false` + 窗口图标独立文件，根治 UOS deb 硬链接安装失败，CI 加 deb 归档校验。上一轮 #56–#59 见 git log。仍遵守决议 #53，每个增量 commit 必须 patch +1）。**本文描述"当前状态与下一步"，会过期——以 `git log` 与各文档变更记录为准。**
 
 ## 0. 必读顺序（15 分钟上手）
 

@@ -19,3 +19,10 @@ for (const size of SIZES) {
   execFileSync('sips', ['-z', String(size), String(size), src, '--out', out], { stdio: 'pipe' })
   console.log(`已生成 ${out}`)
 }
+
+// 窗口图标（extraResources → resources/icons/pantry.png）必须是独立物理文件：
+// 若与 hicolor 的 256x256.png 同一 inode，electron-builder 的硬链接优化会让 deb
+// 归档出现跨 /usr 与 /opt 的硬链接条目，UOS 深度安装器解包直接失败（决议 #60）。
+const windowIcon = join(root, 'build/icons/window-icon.png')
+execFileSync('sips', ['-z', '256', '256', src, '--out', windowIcon], { stdio: 'pipe' })
+console.log(`已生成 ${windowIcon}`)

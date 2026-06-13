@@ -208,7 +208,8 @@ media/stickers/...  # 自定义表情包媒体
 
 ## 10. 构建与 CI
 
-- electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（首版 x64，Debian 10 真机/VM 验证后再扩 arm64）；mac=`dmg`+`zip`（首版当前架构，universal 包后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；productName `茶话间`，appId `com.pantry.app`。
+- electron-builder 要点：`electronVersion: 22.3.27`；win=`nsis`(x64，不出 32 位，决议 #20)+`portable`；linux=`deb`+`AppImage`（首版 x64，Debian 10 真机/VM 验证后再扩 arm64）；mac=`dmg`+`zip`（首版当前架构，universal 包后续专项）；`asar: true` + `asarUnpack: **/better_sqlite3.node`；appId `com.pantry.app`。
+- **productName=`Pantry`，安装路径全 ASCII（决议 #60）**：Linux 装 `/opt/Pantry`、Windows 默认 `Pantry` 目录；显示名经 Linux desktop `Name`、NSIS `shortcutName`、mac `extendInfo` 保持「茶话间」；主进程启动最早处 `app.setName('茶话间')` 固定 userData 与通知名（已有用户数据零迁移）。**Linux 打包必须 `USE_HARD_LINKS=false`**（dist:linux 与 CI 均已内置）：electron-builder 复制硬链接优化会让 deb 出现跨 `/usr`↔`/opt` 硬链接条目，UOS 深度安装器解包报"断开的管道"；窗口图标 extraResources 用独立物理文件 `build/icons/window-icon.png`，CI 解 deb data.tar 校验无硬链接条目、无中文路径。
 - 品牌资源：`build/icons/` 保存可审阅 SVG 源和生成后的 `.png` / `.ico` / `.icns` 打包图标；托盘运行态不依赖文件路径，仍使用内嵌 Data URL，保证开发、打包与 asar 场景一致。
 - GitHub Actions 矩阵：`.github/workflows/release.yml` 中启用 Windows + Linux 两条发布线。Windows 用 `windows-2022` 构建 Win7 SP1 x64 兼容的 NSIS 安装包与 portable exe；Linux 用 `node:18-buster` / Debian 10 容器强制源码重建 better-sqlite3，electron-builder 关闭二次 `npmRebuild`，并检查最终包内 native 模块最高 GLIBC 符号不超过 `GLIBC_2.28`，输出 deb + AppImage，作为 Debian 10 / UOS 20 x64 产物，`.deb` 维护者元数据固定为 `Pantry Maintainers <pantry-maintainers@example.invalid>`。push 到 `main` / 手动触发上传 artifact，推送 `v*` tag 时自动创建/更新 GitHub Release；目标平台真实桌面冒烟仍按 `docs/packaging-test.md` 执行。
 - 版本号：`package.json` 单一来源；协议 `profile.ver` 随包版本注入（"内网有新版"提示的依据，见 protocol §3）。**每轮迭代（每个增量 commit）patch 位递增**（决议 #53）：deb/NSIS 按版本号判断升级，同版本号在 UOS 上会被 dpkg 以"已安装同样版本"拒装；artifactName 含 `${version}`，产物名随之区分。
@@ -267,3 +268,4 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-12 v0.30 UOS20 glibc 2.28 打包修正：electron-builder 关闭二次 native rebuild，Linux `dist` 前强制源码重建 better-sqlite3，并在 CI 校验源码重建产物与最终包内 `.node` 的最高 GLIBC 符号不超过 2.28。
 - 2026-06-12 v0.31 决议 #55 与拖拽区修正：Linux 与 Win7 同策略默认禁硬件加速（§9 风险表更新）；删除聊天头部 `-webkit-app-region: no-drag` 残留——no-drag 矩形会从 drag region 中挖洞，导致 Win7/mac 聊天区顶部 32px 无法拖窗。
 - 2026-06-12 v0.32 第三十二轮（决议 #56–#59）：输入框 emoji 等宽空白字形字体 `PantryEmojiBlank`（§9 风险表更新，gen-emoji-blank-font 脚本 + cmap 覆盖测试）；`SettingsView` 增 `shortcutStatus` 注册结果回传，快捷键默认组合常量收敛 `shared/ipc.ts`；Linux 多尺寸桌面图标 / StartupWMClass / 窗口显式 icon 与 Win·Linux 彩色托盘（§7 资产说明更新）；新增 `win:close` IPC——渲染层 DOM `window.close()` 走 CloseImmediately 绕过 close 事件（§2 红字禁令），是 Win7/UOS 关闭未进托盘的根因。
+- 2026-06-13 v0.33 决议 #60（§10 更新）：productName 改 ASCII `Pantry`（安装路径无中文，显示名与 userData 经 desktop Name / shortcutName / extendInfo / app.setName 保持「茶话间」）；Linux 打包强制 `USE_HARD_LINKS=false` + 窗口图标独立文件，根治 deb 跨树硬链接致 UOS 安装失败；CI 增 deb 归档校验（无硬链接、无中文路径）。
