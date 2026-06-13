@@ -1,4 +1,6 @@
 <script setup lang="ts">
+// 茶话间品牌 logo（决议 #64）：饱满扁平茶杯气泡——茶青实心杯身兼作对话气泡
+// （左下伸出气泡尾），暖茶汤面 + 杯把 + 双蒸汽。与 build/icons/*.svg 同一造型。
 withDefaults(
   defineProps<{
     variant?: 'icon' | 'color' | 'mono'
@@ -22,14 +24,14 @@ withDefaults(
     aria-label="茶话间 logo"
   >
     <rect v-if="variant === 'icon'" class="logo-bg" x="4" y="4" width="56" height="56" rx="14" />
-    <path
-      class="logo-body"
-      d="M25 22h18c3.9 0 7 3.1 7 7v7c0 7.7-6.3 14-14 14h-8.4L20 55v-7.1c-3.7-2.4-6-6.5-6-11V29c0-3.9 3.1-7 7-7h4Z"
-    />
-    <path class="logo-handle" d="M50 31h1.8a7.2 7.2 0 0 1 0 14.4H48" />
-    <path class="logo-tea" d="M24 31.5h20" />
-    <path class="logo-steam" d="M27.5 15.5c-2-2.1-1.2-4.8 1-6.5" />
-    <path class="logo-steam" d="M37.5 15.5c2-2.1 1.2-4.8-1-6.5" />
+    <g :transform="variant === 'icon' ? 'translate(32 32.5) scale(0.82) translate(-32 -30.5)' : ''">
+      <path class="logo-steam" d="M24 16.5c-2.6-2.7-2.6-5.4 0-8.1" />
+      <path class="logo-steam" d="M32.5 16.5c-2.6-2.7-2.6-5.4 0-8.1" />
+      <path class="logo-handle" d="M42 30h4.6a6.7 6.7 0 0 1 0 13.4H43.5" />
+      <path class="logo-tail" d="M22 43.5 L17 53 L31 46 Z" />
+      <rect class="logo-body" x="13" y="20" width="30" height="26" rx="10" />
+      <ellipse class="logo-tea" cx="28" cy="28" rx="12" ry="3.2" />
+    </g>
   </svg>
 </template>
 
@@ -39,39 +41,37 @@ withDefaults(
   flex-shrink: 0;
 }
 .logo-bg {
-  fill: var(--bg-window);
-  stroke: var(--line);
-  stroke-width: 1;
+  fill: #ebf4ef;
 }
-.logo-body {
-  fill: var(--primary-weak);
-  stroke: var(--primary);
-  stroke-width: 3.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.logo-handle,
-.logo-tea,
-.logo-steam {
-  fill: none;
-  stroke-width: 3.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-.logo-handle,
-.logo-steam {
-  stroke: var(--primary);
+.logo-body,
+.logo-tail {
+  fill: var(--primary);
 }
 .logo-tea {
-  stroke: #c49745;
+  fill: #f2c56b;
 }
-.is-mono .logo-body {
+.logo-handle {
   fill: none;
-  stroke: currentColor;
+  stroke: var(--primary);
+  stroke-width: 3.8;
+  stroke-linecap: round;
+}
+.logo-steam {
+  fill: none;
+  stroke: #8fc1ab;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+/* 单色剪影（mac 菜单栏 template 等场景；当前运行时仅 icon 变体在用） */
+.is-mono .logo-body,
+.is-mono .logo-tail {
+  fill: currentColor;
 }
 .is-mono .logo-handle,
-.is-mono .logo-tea,
 .is-mono .logo-steam {
   stroke: currentColor;
+}
+.is-mono .logo-tea {
+  display: none;
 }
 </style>
