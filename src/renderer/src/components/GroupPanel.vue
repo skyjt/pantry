@@ -122,7 +122,7 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
           class="m-avatar"
           :avatar="avatarOf(id)"
           :name="nameOf(id)"
-          :online="id === selfId || (peersStore.byId(id)?.online ?? false)"
+          :online="id === selfId ? undefined : (peersStore.byId(id)?.online ?? false)"
         />
         <span class="nm">{{ nameOf(id) }}</span>
         <button
