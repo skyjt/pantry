@@ -15,8 +15,8 @@
 ## 快速开始
 
 ```bash
-git clone https://github.com/skyjt/pantry_codex.git
-cd pantry_codex
+git clone https://github.com/skyjt/pantry.git
+cd pantry
 npm install
 npm run dev          # 本地开发（热重载）
 ```

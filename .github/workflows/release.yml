@@ -232,6 +232,11 @@ jobs:
       - macos-arm64
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - name: 拉取源码（获取完整提交历史与 tag）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
@@ -241,16 +246,70 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat >release-notes.md <<EOF
-          茶话间 ${GITHUB_REF_NAME} 自动构建产物。
 
-          - Windows 7 SP1 x64：NSIS 安装包与便携版 exe。
-          - Debian 10 / UOS 20 x64：deb 与 AppImage，native 模块在 Debian 10 容器内编译。
-          - macOS arm64（Apple Silicon / M 系列）：dmg 与 zip（未签名，首次打开需右键「打开」绕过 Gatekeeper）。
-          - 每个平台产物附 SHA-256 清单。
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+          VERSION="${CURRENT_TAG#v}"
 
-          各平台产物建议在对应目标系统（Win7 SP1 x64、Debian 10 / UOS 20 x64）上冒烟验证后再分发。
-          EOF
+          # 找上一个 tag（按创建时间倒序排，跳过当前 tag）
+          PREV_TAG=$(git tag -l --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${CURRENT_TAG}"
+          else
+            RANGE="${CURRENT_TAG}"
+          fi
+
+          # 解析 conventional commits，去除 scope 括号
+          extract() {
+            local pat="$1"
+            git log "${RANGE}" --pretty=format:"%s" --no-merges 2>/dev/null \
+              | grep -E "^${pat}(\([^)]*\))?: " \
+              | sed -E "s/^[a-z]+(\([^)]*\))?: /- /" \
+              || true
+          }
+
+          FEATURES=$(extract "feat")
+          FIXES=$(extract "fix")
+          OTHERS=$(extract "docs|chore|refactor|test|perf")
+
+          {
+            echo "## 更新内容"
+            echo ""
+            if [ -n "$FEATURES" ]; then
+              echo "### ✨ 新功能"
+              echo "$FEATURES"
+              echo ""
+            fi
+            if [ -n "$FIXES" ]; then
+              echo "### 🐛 问题修复"
+              echo "$FIXES"
+              echo ""
+            fi
+            if [ -n "$OTHERS" ]; then
+              echo "### 🔧 其他变更"
+              echo "$OTHERS"
+              echo ""
+            fi
+            echo "---"
+            echo ""
+            echo "## 可用安装包"
+            echo ""
+            echo "| 平台 | 文件 | 说明 |"
+            echo "|---|---|---|"
+            echo "| Windows 7 SP1+ x64 | \`Pantry-${VERSION}-win-x64-setup.exe\` | NSIS 安装包 |"
+            echo "| Windows 7 SP1+ x64 | \`Pantry-${VERSION}-win-x64-portable.exe\` | 便携版（免安装） |"
+            echo "| Debian 10 / UOS 20 x64 | \`Pantry-${VERSION}-linux-amd64.deb\` | dpkg 安装包（含信创） |"
+            echo "| Debian 10 / UOS 20 x64 | \`Pantry-${VERSION}-linux-x86_64.AppImage\` | 通用 AppImage |"
+            echo "| macOS arm64（M 系列） | \`Pantry-${VERSION}-mac-arm64.dmg\` | 磁盘映像 |"
+            echo "| macOS arm64（M 系列） | \`Pantry-${VERSION}-mac-arm64.zip\` | 压缩包 |"
+            echo ""
+            echo "> 每个平台产物附 SHA-256 校验清单（\`SHA256SUMS-*.txt\`）。"
+            echo "> macOS 未签名构建，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行 \`xattr -dr com.apple.quarantine /Applications/Pantry.app\`。"
+          } > release-notes.md
+
+          echo "=== release-notes.md ==="
+          cat release-notes.md
+          echo "=== artifacts ==="
           find artifacts -type f | sort
 
       - name: 创建或更新 GitHub Release
@@ -263,10 +322,10 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "茶话间 ${GITHUB_REF_NAME}" \
+              --title "茶话间 · Pantry ${GITHUB_REF_NAME}" \
               --notes-file release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" \
-              --title "茶话间 ${GITHUB_REF_NAME}" \
+              --title "茶话间 · Pantry ${GITHUB_REF_NAME}" \
               --notes-file release-notes.md
           fi

@@ -7,13 +7,13 @@
 <p><b>纯内网、基于 IP 的局域网即时通讯与文件传输工具</b></p>
 
 <p>
-  <a href="https://github.com/skyjt/pantry_codex/releases/latest">
-    <img src="https://img.shields.io/github/v/release/skyjt/pantry_codex?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=3D8B6B&logo=github&logoColor=white" alt="最新版本" />
+  <a href="https://github.com/skyjt/pantry/releases/latest">
+    <img src="https://img.shields.io/github/v/release/skyjt/pantry?style=flat-square&label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC&color=3D8B6B&logo=github&logoColor=white" alt="最新版本" />
   </a>
   <a href="LICENSE">
     <img src="https://img.shields.io/badge/License-MIT-3D8B6B?style=flat-square" alt="MIT License" />
   </a>
-  <a href="https://github.com/skyjt/pantry_codex/releases">
+  <a href="https://github.com/skyjt/pantry/releases">
     <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%207%2B%20%7C%20Linux%20%7C%20macOS-0366d6?style=flat-square" alt="平台" />
   </a>
   <img src="https://img.shields.io/badge/Electron-22-47848F?style=flat-square&logo=electron&logoColor=white" alt="Electron 22" />
@@ -57,14 +57,15 @@
 | 平台 | 最低版本 | 架构 | 分发形式 |
 |---|---|---|---|
 | Windows | 7 SP1（含 8 / 8.1 / 10 / 11），仅 64 位 | x64 | NSIS 安装包、便携版 |
-| Linux | Debian 10（buster）及衍生发行版（含 UOS / 统信） | x64、arm64 | .deb、AppImage |
-| macOS | 26（Tahoe）及以上 | arm64 / x64（universal） | .dmg、.zip |
+| Linux | Debian 10（buster）及衍生发行版 | x64 | .deb、AppImage |
+| UOS 20+（统信 · 信创） | UOS 20 及以上（深度安装器） | x64 | .deb |
+| macOS | 12（Monterey）及以上 | arm64 | .dmg、.zip |
 
 > 为同时支持 Windows 7 与较老的 Linux，应用基于 **Electron 22** 构建——它是最后一个支持 Win7 的大版本，一套二进制即可覆盖全部目标平台。相关约定见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 安装
 
-前往 [**Releases**](https://github.com/skyjt/pantry_codex/releases) 下载对应平台的安装包。
+前往 [**Releases**](https://github.com/skyjt/pantry/releases) 下载对应平台的安装包。
 
 **Windows** — 运行 NSIS 安装包，或解压便携版直接使用。Windows 7 需为 **SP1 且 64 位**；若启用了代码签名，未打补丁的 Win7 需先安装系统更新 KB4474419。
 
@@ -73,7 +74,7 @@
 **macOS** — 打开 `.dmg` 拖入「应用程序」。内网分发若未签名 / 公证，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行：
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/茶话间.app
+xattr -dr com.apple.quarantine /Applications/Pantry.app
 ```
 
 ## 使用
@@ -115,7 +116,7 @@ xattr -dr com.apple.quarantine /Applications/茶话间.app
 
 欢迎参与。源码构建、开发约定与本机联调说明见 **[CONTRIBUTING.md](CONTRIBUTING.md)**。
 
-如遇问题或有功能建议，请在 [Issues](https://github.com/skyjt/pantry_codex/issues) 提交。
+如遇问题或有功能建议，请在 [Issues](https://github.com/skyjt/pantry/issues) 提交。
 
 ## 参考项目
 
