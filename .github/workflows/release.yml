@@ -249,7 +249,7 @@ jobs:
           - macOS arm64（Apple Silicon / M 系列）：dmg 与 zip（未签名，首次打开需右键「打开」绕过 Gatekeeper）。
           - 每个平台产物附 SHA-256 清单。
 
-          Win7 / Debian 10 / UOS 20 的真实桌面冒烟仍按 docs/packaging-test.md 在目标 VM 或真机执行。
+          各平台产物建议在对应目标系统（Win7 SP1 x64、Debian 10 / UOS 20 x64）上冒烟验证后再分发。
           EOF
           find artifacts -type f | sort
 
