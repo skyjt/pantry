@@ -1074,7 +1074,7 @@ async function onDrop(event: DragEvent): Promise<void> {
             class="head-avatar"
             :avatar="peer.avatar"
             :name="peerName"
-            :online="peerOnline"
+            :presence="peerOnline ? 'online' : 'offline'"
           />
           <span class="title-text">
             <span class="title">{{ peerName }}</span>

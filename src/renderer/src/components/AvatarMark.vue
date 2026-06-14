@@ -7,7 +7,10 @@ const props = defineProps<{
   avatar: number
   name: string
   offline?: boolean
-  online?: boolean
+  // 在线状态点：'online' 绿 / 'offline' 灰；不传则不显示任何点。
+  // 不能用 boolean —— Vue 对未传的 Boolean prop 会强制转成 false（而非 undefined），
+  // 会让"不想显示点"的调用方（如导航栏自己头像）也冒出一个灰点（决议 #85）。
+  presence?: 'online' | 'offline'
 }>()
 
 const glyphIndex = computed(() => avatarEmojiIndex(props.avatar))
@@ -24,9 +27,9 @@ const markStyle = computed(() => {
       <span v-else class="avatar-initial">{{ avatarText(avatar, name) }}</span>
     </span>
     <span
-      v-if="online !== undefined"
+      v-if="presence"
       class="status-dot"
-      :class="online ? 'is-online' : 'is-offline'"
+      :class="presence === 'online' ? 'is-online' : 'is-offline'"
     ></span>
   </span>
 </template>
