@@ -114,7 +114,7 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
           class="m-avatar"
           :avatar="peersStore.byId(id)?.avatar ?? -1"
           :name="nameOf(id)"
-          :offline="!(peersStore.byId(id)?.online || id === selfId)"
+          :online="id === selfId || (peersStore.byId(id)?.online ?? false)"
         />
         <span class="nm">{{ nameOf(id) }}</span>
         <button
@@ -134,7 +134,7 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
       </button>
       <ul v-if="adding" class="members addlist">
         <li v-for="p in addable" :key="p.nodeId" class="addable" @click="addMember(p.nodeId)">
-          <AvatarMark class="m-avatar" :avatar="p.avatar" :name="p.remark || p.nick" :offline="!p.online" />
+          <AvatarMark class="m-avatar" :avatar="p.avatar" :name="p.remark || p.nick" :online="p.online" />
           <span class="nm">{{ p.remark || p.nick }}</span>
           <PantryIcon class="plus" name="plus" :size="13" />
         </li>

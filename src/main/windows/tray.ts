@@ -17,6 +17,22 @@ function trayBaseDataURL(): string {
   return process.platform === 'darwin' ? TRAY_ICON_MONO_DATAURL : TRAY_ICON_COLOR_DATAURL
 }
 
+/**
+ * 基础托盘图标（决议 #82）。mac 菜单栏在 retina 上发糊的根因：32px 图被当 1x（逻辑 32pt）
+ * 塞进 ~22pt 高的菜单栏，先缩小再在 retina 上放大，双重模糊。改为按 **@2x** 解释同一张
+ * 32px 图 —— 逻辑 16pt、物理 32px，菜单栏尺寸合适且像素一一对应，清晰不糊。
+ * Win/Linux 仍用 1x 彩色填充版。
+ */
+function createTrayBaseIcon(): ReturnType<typeof nativeImage.createFromDataURL> {
+  if (process.platform === 'darwin') {
+    const b64 = TRAY_ICON_MONO_DATAURL.split(',')[1] ?? ''
+    const icon = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'), { scaleFactor: 2 })
+    icon.setTemplateImage(true)
+    return icon
+  }
+  return nativeImage.createFromDataURL(TRAY_ICON_COLOR_DATAURL)
+}
+
 let flashTimer: ReturnType<typeof setInterval> | null = null
 let flashOn = false
 
@@ -26,9 +42,7 @@ let flashOn = false
  */
 export function setupTray(deps: TrayDeps): Tray | null {
   try {
-    const icon = nativeImage.createFromDataURL(trayBaseDataURL())
-    if (process.platform === 'darwin') icon.setTemplateImage(true)
-    const tray = new Tray(icon)
+    const tray = new Tray(createTrayBaseIcon())
     tray.setToolTip('茶话间')
     tray.setContextMenu(
       Menu.buildFromTemplate([

@@ -31,7 +31,8 @@ const electronMock = vi.hoisted(() => {
       setBadgeCount: vi.fn()
     },
     nativeImage: {
-      createFromDataURL: vi.fn()
+      createFromDataURL: vi.fn(),
+      createFromBuffer: vi.fn()
     },
     Menu: {
       buildFromTemplate: vi.fn()
@@ -64,6 +65,13 @@ function installElectronDefaults(): void {
   electronMock.nativeImage.createFromDataURL.mockImplementation((dataURL: string): FakeNativeImage => {
     return { dataURL, setTemplateImage: vi.fn() }
   })
+  // mac 菜单栏基础图标改走 createFromBuffer（@2x 重解释，决议 #82）
+  electronMock.nativeImage.createFromBuffer.mockReset()
+  electronMock.nativeImage.createFromBuffer.mockImplementation(
+    (_buffer: Buffer, opts?: { scaleFactor?: number }): FakeNativeImage => {
+      return { dataURL: `buffer@${opts?.scaleFactor ?? 1}x`, setTemplateImage: vi.fn() }
+    }
+  )
   electronMock.Menu.buildFromTemplate.mockReset()
   electronMock.Menu.buildFromTemplate.mockImplementation((template: MenuTemplate) => ({ template }))
   electronMock.Tray.mockReset()
@@ -200,8 +208,13 @@ describe('tray unread integration', () => {
     const quit = vi.fn()
 
     const tray = setupTray({ showWindow, quit }) as unknown as FakeTray
-    const image = electronMock.nativeImage.createFromDataURL.mock.results[0].value as FakeNativeImage
+    // macOS 基础图标走 createFromBuffer 并按 @2x 解释（决议 #82），再标记为 template image
+    const image = electronMock.nativeImage.createFromBuffer.mock.results[0].value as FakeNativeImage
 
+    expect(electronMock.nativeImage.createFromBuffer).toHaveBeenCalledWith(
+      expect.anything(),
+      { scaleFactor: 2 }
+    )
     expect(image.setTemplateImage).toHaveBeenCalledWith(true)
     expect(electronMock.Tray).toHaveBeenCalledWith(image)
     expect(tray.setToolTip).toHaveBeenCalledWith('茶话间')

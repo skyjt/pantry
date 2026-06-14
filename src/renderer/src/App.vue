@@ -20,6 +20,7 @@ import { useGroupsStore } from './stores/groups'
 import type { PeerView } from '../../shared/ipc'
 import { applyAppearance } from './utils/appearance'
 import AvatarMark from './components/AvatarMark.vue'
+import { randomQuote } from './utils/quotes'
 
 type Tab = 'chat' | 'contacts'
 
@@ -48,6 +49,8 @@ function openSettings(): void {
   void window.pantry.openSettings()
 }
 const info = ref<AppInfo | null>(null)
+// 主界面空态随机名言（决议 #82）：组件创建（每次打开软件）时随机一条，纯本地内置
+const quote = ref(randomQuote())
 const settings = ref<SettingsView | null>(null)
 const showWizard = ref(false)
 const peersStore = usePeersStore()
@@ -156,10 +159,8 @@ onUnmounted(() => {
       <div v-else class="empty">
         <PantryBrandLogo variant="icon" :size="92" class="empty-logo" />
         <div class="brand-title">茶话间</div>
-        <p v-if="info" class="meta">
-          v{{ info.version }} · Electron {{ info.electron }} · Chromium {{ info.chrome }} · Node
-          {{ info.node }}
-        </p>
+        <p class="quote">{{ quote.text }}</p>
+        <p class="quote-author">—— {{ quote.author }}</p>
         <p class="hint">在「通讯录」里选个人，开始第一句话</p>
       </div>
     </main>
@@ -325,9 +326,17 @@ onUnmounted(() => {
   color: var(--primary);
   margin-bottom: 12px;
 }
-.meta {
-  font-size: 13px;
-  margin-bottom: 4px;
+.quote {
+  font-size: 14px;
+  color: var(--text-2);
+  line-height: 1.7;
+  max-width: 360px;
+  margin: 0 auto 6px;
+}
+.quote-author {
+  font-size: 12px;
+  color: var(--text-3);
+  margin-bottom: 14px;
 }
 .hint {
   font-size: 12px;

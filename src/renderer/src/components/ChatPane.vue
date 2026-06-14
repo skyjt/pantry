@@ -1991,7 +1991,8 @@ async function onDrop(event: DragEvent): Promise<void> {
 .peer-profile-scope {
   position: relative;
   min-width: 0;
-  max-width: 340px;
+  /* 容纳「头像 + 名字 / 在线·完整 IP」两行，避免 IP 被 ellipsis 截掉（决议 #82） */
+  max-width: 460px;
   flex: 0 1 auto;
 }
 .title-button {
