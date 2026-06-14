@@ -66,6 +66,7 @@ async function removeConv(): Promise<void> {
           class="conv-avatar"
           :avatar="peersStore.byId(conv.peerId)?.avatar ?? -1"
           :name="nickOf(conv.peerId)"
+          :online="peersStore.byId(conv.peerId)?.online ?? false"
         />
         <span class="conv-main">
           <span class="row1">

@@ -1070,8 +1070,21 @@ async function onDrop(event: DragEvent): Promise<void> {
           aria-label="查看对方资料"
           @click.stop="togglePeerProfile"
         >
-          <span class="title">{{ peerName }}</span>
-          <span v-if="peerIp" class="subtitle">{{ peerIp }}</span>
+          <AvatarMark
+            class="head-avatar"
+            :avatar="peer.avatar"
+            :name="peerName"
+            :online="peerOnline"
+          />
+          <span class="title-text">
+            <span class="title">{{ peerName }}</span>
+            <span class="subtitle">
+              <span class="state-word" :class="{ on: peerOnline }">{{
+                peerOnline ? '在线' : '离线'
+              }}</span>
+              <template v-if="peerIp"> · {{ peerIp }}</template>
+            </span>
+          </span>
         </button>
         <section
           v-if="showPeerProfile"
@@ -1131,9 +1144,6 @@ async function onDrop(event: DragEvent): Promise<void> {
         <span class="title">{{ peerName }}</span>
       </span>
       <span v-if="isGroup" class="state">{{ group?.members.length ?? 0 }} 人</span>
-      <span v-else class="state" :class="{ on: peerOnline }">{{
-        peerOnline ? '● 在线' : '离线'
-      }}</span>
       <span class="head-spacer"></span>
       <button v-if="isGroup" class="head-btn" title="成员" @click="showMembers = !showMembers">
         <PantryIcon name="users" :size="17" />
@@ -1990,14 +2000,29 @@ async function onDrop(event: DragEvent): Promise<void> {
   border: none;
   background: transparent;
   color: inherit;
-  border-radius: 4px;
-  padding: 4px 6px;
-  margin-left: -6px;
+  border-radius: 6px;
+  padding: 4px 8px 4px 4px;
+  margin-left: -4px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.head-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  flex: 0 0 40px;
+  color: #fff;
+  font-size: 17px;
+}
+.title-text {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  text-align: left;
-  cursor: pointer;
 }
 .title-button:hover,
 .title-button.active {
@@ -2011,6 +2036,13 @@ async function onDrop(event: DragEvent): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 顶部在线状态融入副标题（决议 #81）：在线茶绿、离线灰，不再用孤立的「● 在线」标签 */
+.state-word {
+  color: var(--text-3);
+}
+.state-word.on {
+  color: var(--online);
 }
 .peer-profile-popover {
   position: absolute;
