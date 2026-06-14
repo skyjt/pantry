@@ -723,26 +723,6 @@ async function removeRange(cidr: string): Promise<void> {
                 <button class="primary subtle" @click="saveProfile">保存</button>
               </div>
             </div>
-            <div class="setting-line is-disabled">
-              <div>
-                <strong>每次询问保存位置</strong>
-                <small>后续版本开放。</small>
-              </div>
-              <label class="switch">
-                <input type="checkbox" disabled />
-                <span></span>
-              </label>
-            </div>
-            <div class="setting-line is-disabled">
-              <div>
-                <strong>图片自动接收</strong>
-                <small>20 MB 以内图片会自动进入图片缓存。</small>
-              </div>
-              <label class="switch">
-                <input type="checkbox" checked disabled />
-                <span></span>
-              </label>
-            </div>
           </div>
 
           <div class="panel">
