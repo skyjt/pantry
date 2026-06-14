@@ -13,6 +13,8 @@ export const useChatStore = defineStore('chat', {
     /** 正在查看历史窗口（非最新页）——显示"回到最新"按钮 */
     viewingHistory: false,
     selfId: '',
+    selfNick: '',
+    selfAvatar: -1,
     initialized: false
   }),
   getters: {
@@ -32,6 +34,16 @@ export const useChatStore = defineStore('chat', {
       this.initialized = true
       this.convs = await window.pantry.listConversations()
       this.selfId = (await window.pantry.getAppInfo()).nodeId
+      // 自己的昵称/头像（群成员列表里显示「昵称（我）」+ 真实头像，决议 #83）
+      const selfSettings = await window.pantry.getSettings()
+      if (selfSettings) {
+        this.selfNick = selfSettings.nick
+        this.selfAvatar = selfSettings.avatar
+      }
+      window.pantry.onSettingsUpdated((next) => {
+        this.selfNick = next.nick
+        this.selfAvatar = next.avatar
+      })
 
       window.pantry.onConvsUpdated((convs) => {
         this.convs = convs

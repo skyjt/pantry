@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { GroupView } from '../../../shared/ipc'
 import { usePeersStore } from '../stores/peers'
+import { useChatStore } from '../stores/chat'
 import PantryIcon from './PantryIcon.vue'
 import AvatarMark from './AvatarMark.vue'
 
@@ -12,6 +13,7 @@ const props = defineProps<{ group: GroupView; selfId: string }>()
 const emit = defineEmits<{ close: [] }>()
 
 const peersStore = usePeersStore()
+const chatStore = useChatStore()
 const renaming = ref(false)
 const newName = ref('')
 const adding = ref(false)
@@ -35,8 +37,14 @@ const adminTip = computed(() => {
 })
 
 function nameOf(id: string): string {
-  if (id === props.selfId) return '我'
+  // 自己显示「昵称（我）」而非裸「我」（决议 #83）
+  if (id === props.selfId) return chatStore.selfNick ? `${chatStore.selfNick}（我）` : '我'
   return peersStore.nameOf(id)
+}
+function avatarOf(id: string): number {
+  // 自己不在 peersStore 里，头像取自己的真实设置（决议 #83）
+  if (id === props.selfId) return chatStore.selfAvatar
+  return peersStore.byId(id)?.avatar ?? -1
 }
 
 async function rename(): Promise<void> {
@@ -112,7 +120,7 @@ async function updateAdmin(patch: { name?: string; add?: string[]; remove?: stri
       <li v-for="id in group.members" :key="id">
         <AvatarMark
           class="m-avatar"
-          :avatar="peersStore.byId(id)?.avatar ?? -1"
+          :avatar="avatarOf(id)"
           :name="nameOf(id)"
           :online="id === selfId || (peersStore.byId(id)?.online ?? false)"
         />
