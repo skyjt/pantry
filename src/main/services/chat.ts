@@ -10,7 +10,13 @@ import {
   type Envelope,
   type MsgPayload
 } from '../../shared/protocol'
-import type { ConversationView, MessageView, MsgStatusEvent, NudgeEvent, NudgeResult } from '../../shared/ipc'
+import type {
+  ConversationView,
+  MessageView,
+  MsgStatusEvent,
+  NudgeEvent,
+  NudgeResult
+} from '../../shared/ipc'
 import { makeEnvelope } from '../net/codec'
 import type { Messenger } from '../net/messenger'
 import { ConvRepo, convRowToView, type ConvRow } from '../store/conv-repo'
@@ -127,15 +133,19 @@ export class ChatService extends EventEmitter {
     return row ? toMsgView(row) : null
   }
 
-  /** 私聊窗口震动：即时动作，不落库、不离线补发；发送端按对端限流（决议 #109）。 */
+  /** 私聊窗口震动：可靠即时动作，不离线补发；发送成功后写本地系统提示（决议 #109/#110）。 */
   async sendNudge(peerId: string): Promise<NudgeResult> {
     if (!peerId || peerId.length > 64) return { ok: false, reason: 'invalid' }
+    const convId = this.deps.convRepo.ensureSingle(peerId)
     const limit = this.consumeNudgeLimit(this.outgoingNudges, peerId, Date.now())
     if (!limit.ok) return limit
 
     const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, this.deps.selfId, { kind: 'nudge' })
     const delivered = await this.deps.messenger.sendReliable(peerId, env)
-    return delivered ? { ok: true } : { ok: false, reason: 'undelivered' }
+    if (!delivered) return { ok: false, reason: 'undelivered' }
+
+    this.insertSystemTip(env.id, convId, this.deps.selfId, '你发送了一次窗口震动', env.ts, false)
+    return { ok: true }
   }
 
   /** 手动重发（失败/排队中的自己的消息）：沿用原 id，对端凭 id 去重 */
@@ -251,12 +261,24 @@ export class ChatService extends EventEmitter {
   private onIncomingNudge(env: Envelope<MsgPayload>): void {
     const payload = env.payload
     if (payload.kind !== 'nudge') return
+    if (this.deps.msgRepo.get(env.id)) return
     const limit = this.consumeNudgeLimit(this.incomingNudges, env.from, Date.now())
     if (!limit.ok) return
+    const ts = Date.now()
+    const convId = this.deps.convRepo.ensureSingle(env.from)
+    const inserted = this.insertSystemTip(
+      env.id,
+      convId,
+      env.from,
+      '对方发来一次窗口震动',
+      ts,
+      false
+    )
+    if (!inserted) return
     const event: NudgeEvent = {
       peerId: env.from,
-      convId: `single:${env.from}`,
-      ts: Date.now()
+      convId,
+      ts
     }
     this.emit('nudge', event)
   }
@@ -333,6 +355,33 @@ export class ChatService extends EventEmitter {
     const row = this.deps.msgRepo.get(tipId)
     if (row && inserted) this.emit('message', toMsgView(row))
     this.emitConvs()
+  }
+
+  private insertSystemTip(
+    id: string,
+    convId: string,
+    senderId: string,
+    content: string,
+    ts: number,
+    countUnread: boolean
+  ): boolean {
+    const inserted = this.deps.msgRepo.insert({
+      id,
+      convId,
+      senderId,
+      isMine: false,
+      kind: 'system',
+      content,
+      ts,
+      status: 'sent'
+    })
+    if (!inserted) return false
+    this.deps.convRepo.bump(convId, ts)
+    if (countUnread) this.deps.convRepo.incUnread(convId)
+    const row = this.deps.msgRepo.get(id)
+    if (row) this.emit('message', toMsgView(row))
+    this.emitConvs()
+    return true
   }
 
   private applyStatus(msgId: string, status: MessageView['status']): void {

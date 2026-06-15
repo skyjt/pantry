@@ -138,11 +138,6 @@ const nudgeToolTip = computed(() => {
   }
   return '窗口震动'
 })
-const incomingNudgeNotice = computed(() => {
-  const event = chatStore.lastNudge
-  if (!event || event.convId !== chatStore.activeConvId || isGroup.value) return ''
-  return `${peerName.value} 发来窗口震动`
-})
 const mentionMembers = computed(() =>
   group.value ? group.value.members.filter((id) => id !== chatStore.selfId) : []
 )
@@ -700,7 +695,6 @@ async function sendNudge(): Promise<void> {
     const result = await chatStore.sendNudge()
     if (result.ok) {
       startNudgeRetry(NUDGE_MIN_INTERVAL_MS)
-      setNudgeFeedback('已发送窗口震动')
       return
     }
     if (result.reason === 'rate-limited') {
@@ -1411,12 +1405,8 @@ async function onDrop(event: DragEvent): Promise<void> {
         </span>
         <span v-else-if="isGroup" class="tool-hint">仅在线群成员可接收图片/文件</span>
         <span v-else-if="!peerOnline" class="tool-hint">对方离线，无法发送图片/文件</span>
-        <span
-          v-if="nudgeFeedback || incomingNudgeNotice"
-          class="nudge-feedback"
-          :class="nudgeFeedback?.kind ?? 'ok'"
-        >
-          {{ nudgeFeedback?.text || incomingNudgeNotice }}
+        <span v-if="nudgeFeedback" class="nudge-feedback" :class="nudgeFeedback.kind">
+          {{ nudgeFeedback.text }}
         </span>
         <span class="toolbar-spacer"></span>
         <span class="history-search-scope">

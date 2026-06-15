@@ -80,6 +80,12 @@ class FakeMsgRepo {
 class FakeConvRepo {
   bumped: Array<{ convId: string; ts: number }> = []
   unread: string[] = []
+  ensured: string[] = []
+
+  ensureSingle(peerId: string): string {
+    this.ensured.push(peerId)
+    return `single:${peerId}`
+  }
 
   bump(convId: string, ts: number): void {
     this.bumped.push({ convId, ts })
@@ -152,12 +158,13 @@ describe('ChatService 撤回', () => {
 })
 
 describe('ChatService 私聊窗口震动', () => {
-  it('发送震动走可靠通道但不写消息库，连续发送会被限流', async () => {
+  it('发送震动走可靠通道并写本地系统提示，连续发送会被限流', async () => {
     const msgRepo = new FakeMsgRepo()
     const messenger = new FakeMessenger()
+    const convRepo = new FakeConvRepo()
     const chat = new ChatService({
       selfId: 'node-self',
-      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      convRepo: convRepo as unknown as ConvRepo,
       msgRepo: msgRepo as unknown as MsgRepo,
       groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
       messenger: messenger as unknown as Messenger
@@ -169,7 +176,16 @@ describe('ChatService 私聊窗口震动', () => {
       peerId: 'node-peer',
       env: { type: 'msg', payload: { kind: 'nudge' } }
     })
-    expect(msgRepo.inserted).toHaveLength(0)
+    expect(msgRepo.inserted).toHaveLength(1)
+    expect(msgRepo.inserted[0]).toMatchObject({
+      id: messenger.reliableSent[0].env.id,
+      convId: 'single:node-peer',
+      senderId: 'node-self',
+      kind: 'system',
+      content: '你发送了一次窗口震动',
+      status: 'sent'
+    })
+    expect(convRepo.bumped).toHaveLength(1)
     expect(messenger.sent).toHaveLength(0)
 
     const limited = await chat.sendNudge('node-peer')
@@ -177,20 +193,24 @@ describe('ChatService 私聊窗口震动', () => {
     expect(limited.reason).toBe('rate-limited')
     expect(limited.retryAfterMs).toBeGreaterThan(0)
     expect(messenger.reliableSent).toHaveLength(1)
+    expect(msgRepo.inserted).toHaveLength(1)
   })
 
-  it('收到震动只触发本地事件，不入库；重复入站被接收端限流', () => {
+  it('收到震动写本地系统提示并触发定位事件；重复入站被接收端限流', () => {
     const msgRepo = new FakeMsgRepo()
     const messenger = new FakeMessenger()
+    const convRepo = new FakeConvRepo()
     const chat = new ChatService({
       selfId: 'node-self',
-      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      convRepo: convRepo as unknown as ConvRepo,
       msgRepo: msgRepo as unknown as MsgRepo,
       groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
       messenger: messenger as unknown as Messenger
     })
     const nudges: Array<{ peerId: string; convId: string }> = []
+    const messages: Array<{ kind: string; text: string; convId: string }> = []
     chat.on('nudge', (event: { peerId: string; convId: string }) => nudges.push(event))
+    chat.on('message', (msg: { kind: string; text: string; convId: string }) => messages.push(msg))
 
     const env: Envelope<MsgPayload> = {
       v: 1,
@@ -205,6 +225,22 @@ describe('ChatService 私聊窗口震动', () => {
 
     expect(nudges).toHaveLength(1)
     expect(nudges[0]).toMatchObject({ peerId: 'node-peer', convId: 'single:node-peer' })
-    expect(msgRepo.inserted).toHaveLength(0)
+    expect(msgRepo.inserted).toHaveLength(1)
+    expect(msgRepo.inserted[0]).toMatchObject({
+      id: 'nudge-1',
+      convId: 'single:node-peer',
+      senderId: 'node-peer',
+      kind: 'system',
+      content: '对方发来一次窗口震动',
+      status: 'sent'
+    })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({
+      kind: 'system',
+      text: '对方发来一次窗口震动',
+      convId: 'single:node-peer'
+    })
+    expect(convRepo.bumped).toHaveLength(1)
+    expect(convRepo.unread).toHaveLength(0)
   })
 })

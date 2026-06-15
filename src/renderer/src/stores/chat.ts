@@ -10,6 +10,7 @@ import type {
 
 // 主进程聊天数据的投影 + 乐观更新（tech-design §7 状态流）
 let nudgeClearTimer: ReturnType<typeof setTimeout> | null = null
+let nudgeOpenRun = 0
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -68,13 +69,17 @@ export const useChatStore = defineStore('chat', {
         if (target) target.status = event.status
       })
       window.pantry.onNudgeReceived((event) => {
-        this.lastNudge = event
-        if (nudgeClearTimer) clearTimeout(nudgeClearTimer)
-        nudgeClearTimer = setTimeout(() => {
-          if (this.lastNudge?.ts === event.ts && this.lastNudge.peerId === event.peerId) {
-            this.lastNudge = null
-          }
-        }, 3000)
+        const run = ++nudgeOpenRun
+        void this.openConv(event.convId).then(() => {
+          if (run !== nudgeOpenRun) return
+          this.lastNudge = event
+          if (nudgeClearTimer) clearTimeout(nudgeClearTimer)
+          nudgeClearTimer = setTimeout(() => {
+            if (this.lastNudge?.ts === event.ts && this.lastNudge.peerId === event.peerId) {
+              this.lastNudge = null
+            }
+          }, 3000)
+        })
       })
       // 点系统通知/托盘 → 直达对应会话（F-SYS-2），单聊群聊通用
       window.pantry.onOpenConv((convId) => {
