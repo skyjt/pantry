@@ -3,7 +3,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   OCR_AUTO_MAX_PIXELS,
+  findNearestOcrTokenIndex,
   getCachedOcrResult,
+  getOcrSelectionBounds,
+  getOcrTokenRangeIds,
   getSelectedOcrText,
   isAutoOcrCandidate,
   recognizeImageText,
@@ -28,7 +31,6 @@ const PAN_STEP = 48
 type Point = ImagePoint
 type DragStart = Point & { offsetX: number; offsetY: number }
 type OcrStatus = 'idle' | 'loading-source' | 'recognizing' | 'ready' | 'error'
-type SelectionRect = { x: number; y: number; width: number; height: number }
 type CopyTip = { x: number; y: number; text: string }
 
 const zoom = ref(1)
@@ -47,12 +49,11 @@ const ocrProgress = ref(0)
 const ocrMessage = ref('')
 const ocrTokens = ref<OcrToken[]>([])
 const selectedOcrIds = ref<Set<string>>(new Set())
-const ocrSelectRect = ref<SelectionRect | null>(null)
 const copyTip = ref<CopyTip | null>(null)
 const isSelectingOcr = ref(false)
 
 let dragStart: DragStart | null = null
-let ocrSelectionStart: Point | null = null
+let ocrSelectionStartTokenIndex: number | null = null
 let ocrAutoStarted = false
 let copyTipTimer: ReturnType<typeof setTimeout> | null = null
 let loadToken = 0
@@ -97,16 +98,6 @@ const imageStyle = computed(() => {
     left: `calc(50% + ${offset.value.x}px)`,
     top: `calc(50% + ${offset.value.y}px)`,
     transform: `translate3d(-50%, -50%, 0) rotate(${rotation.value}deg)`
-  }
-})
-const selectionStyle = computed(() => {
-  const rect = ocrSelectRect.value
-  if (!rect) return {}
-  return {
-    left: `${rect.x * zoom.value}px`,
-    top: `${rect.y * zoom.value}px`,
-    width: `${rect.width * zoom.value}px`,
-    height: `${rect.height * zoom.value}px`
   }
 })
 const copyTipStyle = computed(() => {
@@ -230,7 +221,8 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
   if (!canStartOcr.value) return
   const token = ++ocrToken
   clearOcrSelection()
-  const cached = cachedOcrResult()
+  const cached = await readCachedOcrResult()
+  if (token !== ocrToken) return
   if (cached) {
     applyOcrResult(cached)
     return
@@ -265,6 +257,8 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
       }
     })
     if (token !== ocrToken) return
+    await saveCachedOcrResult(result)
+    if (token !== ocrToken) return
     applyOcrResult(result)
   } catch (err) {
     console.warn('[image-ocr] 识别失败：', err instanceof Error ? err.message : String(err))
@@ -278,6 +272,28 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
 function cachedOcrResult(): OcrResult | null {
   const cacheKey = imageOcrCacheKey.value
   return cacheKey ? getCachedOcrResult(cacheKey) : null
+}
+
+async function readCachedOcrResult(): Promise<OcrResult | null> {
+  const local = cachedOcrResult()
+  if (local) return local
+  const cacheKey = imageOcrCacheKey.value
+  if (!cacheKey) return null
+  try {
+    return await window.pantry.getImageOcrResult(props.transferId, cacheKey)
+  } catch {
+    return null
+  }
+}
+
+async function saveCachedOcrResult(result: OcrResult): Promise<void> {
+  const cacheKey = imageOcrCacheKey.value
+  if (!cacheKey) return
+  try {
+    await window.pantry.saveImageOcrResult(props.transferId, cacheKey, result)
+  } catch {
+    // OCR 缓存失败不影响当前窗口选择文字。
+  }
 }
 
 function applyOcrResult(result: OcrResult): void {
@@ -312,9 +328,8 @@ function clearCopyTip(): void {
 
 function clearOcrSelection(): void {
   selectedOcrIds.value = new Set()
-  ocrSelectRect.value = null
   isSelectingOcr.value = false
-  ocrSelectionStart = null
+  ocrSelectionStartTokenIndex = null
   clearCopyTip()
 }
 
@@ -325,10 +340,9 @@ function resetOcrState(): void {
   ocrMessage.value = ''
   ocrTokens.value = []
   selectedOcrIds.value = new Set()
-  ocrSelectRect.value = null
   copyTip.value = null
   isSelectingOcr.value = false
-  ocrSelectionStart = null
+  ocrSelectionStartTokenIndex = null
   ocrAutoStarted = false
   if (copyTipTimer) {
     clearTimeout(copyTipTimer)
@@ -346,36 +360,6 @@ function pointFromOcrEvent(event: PointerEvent): Point | null {
   }
 }
 
-function rectFromPoints(a: Point, b: Point): SelectionRect {
-  const x = Math.min(a.x, b.x)
-  const y = Math.min(a.y, b.y)
-  return {
-    x,
-    y,
-    width: Math.abs(a.x - b.x),
-    height: Math.abs(a.y - b.y)
-  }
-}
-
-function selectOcrTokens(rect: SelectionRect): void {
-  const selection = rect.width < 2 && rect.height < 2
-    ? { x: rect.x - 2, y: rect.y - 2, width: 4, height: 4 }
-    : rect
-  const ids = ocrTokens.value
-    .filter((token) => intersects(selection, token.bbox))
-    .map((token) => token.id)
-  selectedOcrIds.value = new Set(ids)
-}
-
-function intersects(rect: SelectionRect, box: { x0: number; y0: number; x1: number; y1: number }): boolean {
-  return (
-    box.x1 >= rect.x &&
-    box.x0 <= rect.x + rect.width &&
-    box.y1 >= rect.y &&
-    box.y0 <= rect.y + rect.height
-  )
-}
-
 function ocrTokenStyle(token: OcrToken): Record<string, string> {
   return {
     left: `${token.bbox.x0 * zoom.value}px`,
@@ -385,25 +369,27 @@ function ocrTokenStyle(token: OcrToken): Record<string, string> {
   }
 }
 
-function onOcrPointerDown(event: PointerEvent): void {
+function onOcrPointerDown(event: PointerEvent, token: OcrToken): void {
   if (!canSelectOcr.value || event.button !== 0) return
-  const point = pointFromOcrEvent(event)
-  if (!point) return
   const target = event.currentTarget as HTMLElement
   target.setPointerCapture(event.pointerId)
   clearOcrSelection()
   isSelectingOcr.value = true
-  ocrSelectionStart = point
-  ocrSelectRect.value = { x: point.x, y: point.y, width: 0, height: 0 }
+  ocrSelectionStartTokenIndex = token.tokenIndex
+  selectedOcrIds.value = new Set([token.id])
 }
 
 function onOcrPointerMove(event: PointerEvent): void {
-  if (!isSelectingOcr.value || !ocrSelectionStart) return
+  if (!isSelectingOcr.value || ocrSelectionStartTokenIndex === null) return
   const point = pointFromOcrEvent(event)
   if (!point) return
-  const rect = rectFromPoints(ocrSelectionStart, point)
-  ocrSelectRect.value = rect
-  selectOcrTokens(rect)
+  const endTokenIndex = findNearestOcrTokenIndex(ocrTokens.value, point)
+  if (endTokenIndex === null) return
+  selectedOcrIds.value = new Set(getOcrTokenRangeIds(
+    ocrTokens.value,
+    ocrSelectionStartTokenIndex,
+    endTokenIndex
+  ))
 }
 
 function finishOcrSelection(event: PointerEvent): void {
@@ -411,15 +397,15 @@ function finishOcrSelection(event: PointerEvent): void {
   const target = event.currentTarget as HTMLElement
   if (target.hasPointerCapture(event.pointerId)) target.releasePointerCapture(event.pointerId)
   isSelectingOcr.value = false
-  ocrSelectionStart = null
-  const rect = ocrSelectRect.value
-  if (!rect || !canCopySelectedOcr.value) {
+  ocrSelectionStartTokenIndex = null
+  const bounds = getOcrSelectionBounds(ocrTokens.value, selectedOcrIds.value)
+  if (!bounds || !canCopySelectedOcr.value) {
     clearCopyTip()
     return
   }
   copyTip.value = {
-    x: clamp((rect.x + rect.width / 2) * zoom.value, 8, natural.value.width * zoom.value - 58),
-    y: clamp((rect.y + rect.height) * zoom.value + 8, 8, natural.value.height * zoom.value - 34),
+    x: clamp(((bounds.x0 + bounds.x1) / 2) * zoom.value, 8, natural.value.width * zoom.value - 58),
+    y: clamp(bounds.y1 * zoom.value + 8, 8, natural.value.height * zoom.value - 34),
     text: '复制'
   }
 }
@@ -466,11 +452,25 @@ async function onImageLoad(event: Event): Promise<void> {
     zoom.value = clamp(initialZoom, MIN_ZOOM, MAX_ZOOM)
     centerImage()
     viewMode.value = zoom.value < 0.999 ? 'fit' : 'free'
-    maybeStartAutoOcr()
+    const cachedOcr = await readCachedOcrResult()
+    if (token !== loadToken) return
+    if (cachedOcr) {
+      ocrAutoStarted = true
+      applyOcrResult(cachedOcr)
+    } else {
+      maybeStartAutoOcr()
+    }
   } catch {
     if (token === loadToken) {
       applyFit()
-      maybeStartAutoOcr()
+      const cachedOcr = await readCachedOcrResult()
+      if (token !== loadToken) return
+      if (cachedOcr) {
+        ocrAutoStarted = true
+        applyOcrResult(cachedOcr)
+      } else {
+        maybeStartAutoOcr()
+      }
     }
   }
 }
@@ -646,13 +646,12 @@ onBeforeUnmount(() => {
             :class="{ selected: selectedOcrIds.has(token.id) }"
             :style="ocrTokenStyle(token)"
             aria-hidden="true"
-            @pointerdown.stop.prevent="onOcrPointerDown"
+            @pointerdown.stop.prevent="onOcrPointerDown($event, token)"
             @pointermove.stop.prevent="onOcrPointerMove"
             @pointerup.stop.prevent="finishOcrSelection"
             @pointercancel.stop.prevent="finishOcrSelection"
             @dblclick.stop
           ></span>
-          <span v-if="ocrSelectRect" class="ocr-selection" :style="selectionStyle"></span>
           <button
             v-if="copyTip"
             class="ocr-copy"
@@ -868,30 +867,20 @@ onBeforeUnmount(() => {
 }
 .ocr-token {
   position: absolute;
-  border-radius: 2px;
-  background: rgba(91, 191, 145, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(91, 191, 145, 0.24);
-  opacity: 0.42;
+  border-radius: 1px;
+  background: transparent;
+  opacity: 1;
   pointer-events: none;
 }
 .ocr-layer.selectable .ocr-token {
   cursor: text;
   pointer-events: auto;
 }
-.ocr-token.selected {
-  background: rgba(91, 191, 145, 0.28);
-  box-shadow:
-    inset 0 0 0 1px rgba(121, 225, 176, 0.72),
-    0 0 0 1px rgba(15, 18, 16, 0.32);
-  opacity: 1;
+.ocr-layer.selectable .ocr-token:hover {
+  background: rgba(91, 191, 145, 0.12);
 }
-.ocr-selection {
-  position: absolute;
-  border: 1px solid rgba(126, 230, 184, 0.88);
-  border-radius: 4px;
-  background: rgba(91, 191, 145, 0.16);
-  pointer-events: none;
-  box-shadow: 0 0 0 1px rgba(12, 16, 14, 0.28);
+.ocr-token.selected {
+  background: rgba(91, 191, 145, 0.34);
 }
 .ocr-copy {
   position: absolute;

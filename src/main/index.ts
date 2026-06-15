@@ -29,6 +29,7 @@ import {
   type DataImportResult,
   type ExportFormat,
   type ForwardTarget,
+  type ImageOcrResult,
   type ImageOcrSource,
   type MessageView,
   type NetState,
@@ -63,6 +64,7 @@ import { Discovery, type ManualPeer } from './net/discovery'
 import { Messenger } from './net/messenger'
 import { PeerClock } from './net/peer-clock'
 import { ChatService } from './services/chat'
+import { ImageOcrResultCache } from './services/image-ocr-cache'
 import type { PeerRecord } from './net/peer-registry'
 
 // Win7（NT 6.1）终端为统一 VM 部署，虚拟显卡驱动不可靠；UOS/Debian 目标机多国产 GPU 或旧驱动，
@@ -110,6 +112,7 @@ if (!gotLock) {
 
   const netState: NetState = { ok: false, udpPort, error: '' }
   const OCR_SOURCE_MAX_BYTES = 25 * 1024 * 1024
+  const imageOcrCache = new ImageOcrResultCache()
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
   const remarks = new Map<string, string>()
@@ -1166,6 +1169,25 @@ if (!gotLock) {
       return null
     }
   })
+
+  ipcMain.handle(IpcChannels.imgOcrResultGet, (event, transferId: unknown, cacheKey: unknown): ImageOcrResult | null => {
+    if (typeof transferId !== 'string' || typeof cacheKey !== 'string') return null
+    if (!event.sender.getURL().includes('#/image-viewer?')) return null
+    const view = files?.transferView(transferId)
+    if (!view?.savedPath || view.status !== 'done') return null
+    return imageOcrCache.get(transferId, cacheKey)
+  })
+
+  ipcMain.handle(
+    IpcChannels.imgOcrResultSet,
+    (event, transferId: unknown, cacheKey: unknown, result: unknown): boolean => {
+      if (typeof transferId !== 'string' || typeof cacheKey !== 'string') return false
+      if (!event.sender.getURL().includes('#/image-viewer?')) return false
+      const view = files?.transferView(transferId)
+      if (!view?.savedPath || view.status !== 'done') return false
+      return imageOcrCache.set(transferId, cacheKey, result)
+    }
+  )
 
   ipcMain.handle(
     IpcChannels.groupCreate,

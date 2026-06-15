@@ -41,6 +41,8 @@ export const IpcChannels = {
   imgOpenViewer: 'img:open-viewer',
   imgFitViewerWindow: 'img:fit-viewer-window',
   imgOcrSource: 'img:ocr-source',
+  imgOcrResultGet: 'img:ocr-result-get',
+  imgOcrResultSet: 'img:ocr-result-set',
   imgSaveAs: 'img:save-as',
   searchQuery: 'search:query',
   msgSearch: 'msg:search',
@@ -195,6 +197,38 @@ export interface ImageOcrSource {
   name: string
   size: number
   bytes: ArrayBuffer
+}
+
+export interface ImageOcrBox {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+export interface ImageOcrToken {
+  id: string
+  text: string
+  confidence: number
+  bbox: ImageOcrBox
+  lineIndex: number
+  wordIndex: number
+  tokenIndex: number
+}
+
+export interface ImageOcrLine {
+  id: string
+  text: string
+  bbox: ImageOcrBox
+  tokenIds: string[]
+  lineIndex: number
+}
+
+export interface ImageOcrResult {
+  text: string
+  tokens: ImageOcrToken[]
+  lines: ImageOcrLine[]
+  scale: number
 }
 
 export interface MsgStatusEvent {
@@ -427,6 +461,10 @@ export interface PantryApi {
   fitImageViewerWindow(width: number, height: number): Promise<number>
   /** 图片窗口 OCR：读取已完成图片的受限字节源，不暴露路径 */
   getImageOcrSource(transferId: string): Promise<ImageOcrSource | null>
+  /** 图片窗口 OCR：读取主进程会话级缓存结果，避免重新打开图片后重复识别 */
+  getImageOcrResult(transferId: string, cacheKey: string): Promise<ImageOcrResult | null>
+  /** 图片窗口 OCR：保存主进程会话级缓存结果，不落库 */
+  saveImageOcrResult(transferId: string, cacheKey: string, result: ImageOcrResult): Promise<boolean>
   /** 大图查看器"另存为" */
   saveImageAs(transferId: string): Promise<boolean>
   /** 全局搜索（防抖在渲染层做） */
