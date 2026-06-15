@@ -3,9 +3,11 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   OCR_AUTO_MAX_PIXELS,
+  getCachedOcrResult,
   getSelectedOcrText,
   isAutoOcrCandidate,
   recognizeImageText,
+  type OcrResult,
   type OcrToken
 } from '../utils/ocr'
 import PantryIcon from './PantryIcon.vue'
@@ -28,6 +30,7 @@ const zoom = ref(1)
 const rotation = ref(0)
 const offset = ref<Point>({ x: 0, y: 0 })
 const natural = ref({ width: 0, height: 0 })
+const imagePlaneEl = ref<HTMLElement | null>(null)
 const ocrLayerEl = ref<HTMLElement | null>(null)
 const loading = ref(true)
 const broken = ref(false)
@@ -60,6 +63,10 @@ const canSelectOcr = computed(
 const selectedOcrText = computed(() => getSelectedOcrText(ocrTokens.value, selectedOcrIds.value))
 const canCopySelectedOcr = computed(() => selectedOcrText.value.length > 0)
 const canCopyAllOcr = computed(() => ocrStatus.value === 'ready' && ocrTokens.value.length > 0)
+const imageOcrCacheKey = computed(() => {
+  if (!props.transferId || natural.value.width <= 0 || natural.value.height <= 0) return ''
+  return `${props.transferId}:${natural.value.width}x${natural.value.height}`
+})
 const ocrLabel = computed(() => {
   if (ocrStatus.value === 'loading-source') return '准备识别'
   if (ocrStatus.value === 'recognizing') return `识别中 ${Math.round(ocrProgress.value * 100)}%`
@@ -72,7 +79,7 @@ const ocrLabel = computed(() => {
 })
 const ocrButtonTitle = computed(() => {
   if (isOcrBusy.value) return ocrLabel.value
-  if (ocrStatus.value === 'ready') return '重新识别文字'
+  if (ocrStatus.value === 'ready') return '文字已识别'
   if (ocrStatus.value === 'error') return '重试识别文字'
   return '识别文字'
 })
@@ -137,6 +144,35 @@ function applyActualSize(): void {
   viewMode.value = 'free'
 }
 
+function pointFromImageClient(clientX: number, clientY: number): Point | null {
+  const plane = imagePlaneEl.value
+  if (!plane || zoom.value <= 0 || rotation.value !== 0) return null
+  const rect = plane.getBoundingClientRect()
+  if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+    return null
+  }
+  return {
+    x: clamp((clientX - rect.left) / zoom.value, 0, natural.value.width),
+    y: clamp((clientY - rect.top) / zoom.value, 0, natural.value.height)
+  }
+}
+
+function applyZoomAroundPoint(nextZoom: number, imagePoint: Point, clientPoint: Point): void {
+  const clampedZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM)
+  const viewportCenter = {
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2
+  }
+  const nextWidth = natural.value.width * clampedZoom
+  const nextHeight = natural.value.height * clampedZoom
+  zoom.value = clampedZoom
+  offset.value = {
+    x: clientPoint.x - viewportCenter.x + nextWidth / 2 - imagePoint.x * clampedZoom,
+    y: clientPoint.y - viewportCenter.y + nextHeight / 2 - imagePoint.y * clampedZoom
+  }
+  viewMode.value = 'free'
+}
+
 function setZoom(nextZoom: number): void {
   zoom.value = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM)
   viewMode.value = 'free'
@@ -150,8 +186,15 @@ function zoomOut(): void {
   setZoom(zoom.value / ZOOM_STEP)
 }
 
-function toggleActualSize(): void {
+function toggleActualSize(event?: MouseEvent): void {
   if (viewMode.value === 'fit' || Math.abs(zoom.value - fitScale()) < 0.01) {
+    if (event) {
+      const imagePoint = pointFromImageClient(event.clientX, event.clientY)
+      if (imagePoint) {
+        applyZoomAroundPoint(1, imagePoint, { x: event.clientX, y: event.clientY })
+        return
+      }
+    }
     applyActualSize()
   } else {
     applyFit()
@@ -178,6 +221,11 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
   if (!canStartOcr.value) return
   const token = ++ocrToken
   clearOcrSelection()
+  const cached = cachedOcrResult()
+  if (cached) {
+    applyOcrResult(cached)
+    return
+  }
   ocrStatus.value = 'loading-source'
   ocrProgress.value = 0
   ocrMessage.value = ''
@@ -197,7 +245,7 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
     }
     ocrStatus.value = 'recognizing'
     const result = await recognizeImageText({
-      cacheKey: `${props.transferId}:${source.size}:${natural.value.width}x${natural.value.height}`,
+      cacheKey: imageOcrCacheKey.value,
       source,
       naturalWidth: natural.value.width,
       naturalHeight: natural.value.height,
@@ -208,10 +256,7 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
       }
     })
     if (token !== ocrToken) return
-    ocrTokens.value = result.tokens
-    ocrStatus.value = 'ready'
-    ocrProgress.value = 1
-    ocrMessage.value = result.tokens.length > 0 ? '' : '未识别到文字'
+    applyOcrResult(result)
   } catch (err) {
     console.warn('[image-ocr] 识别失败：', err instanceof Error ? err.message : String(err))
     if (token !== ocrToken) return
@@ -219,6 +264,18 @@ async function startOcr(mode: 'auto' | 'manual' = 'manual'): Promise<void> {
     ocrProgress.value = 0
     ocrMessage.value = '识别失败'
   }
+}
+
+function cachedOcrResult(): OcrResult | null {
+  const cacheKey = imageOcrCacheKey.value
+  return cacheKey ? getCachedOcrResult(cacheKey) : null
+}
+
+function applyOcrResult(result: OcrResult): void {
+  ocrTokens.value = result.tokens
+  ocrStatus.value = 'ready'
+  ocrProgress.value = 1
+  ocrMessage.value = result.tokens.length > 0 ? '' : '未识别到文字'
 }
 
 function maybeStartAutoOcr(): void {
@@ -548,11 +605,12 @@ onBeforeUnmount(() => {
       @pointermove="onPointerMove"
       @pointerup="finishDrag"
       @pointercancel="finishDrag"
-      @dblclick.stop="toggleActualSize"
+      @dblclick.stop="toggleActualSize($event)"
     >
       <div v-if="loading" class="viewer-state">图片加载中…</div>
       <div v-else-if="broken" class="viewer-state error">图片不可用</div>
       <div
+        ref="imagePlaneEl"
         class="image-plane"
         :class="{ pending: loading || broken }"
         :style="imageStyle"

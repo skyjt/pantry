@@ -113,6 +113,10 @@ const progressListeners = new Set<ProgressListener>()
 const resultCache = new Map<string, OcrResult>()
 let workerPromise: Promise<OcrWorker> | null = null
 
+export function getCachedOcrResult(cacheKey: string): OcrResult | null {
+  return resultCache.get(cacheKey) ?? null
+}
+
 export function isAutoOcrCandidate(width: number, height: number, bytes: number): boolean {
   return width * height <= OCR_AUTO_MAX_PIXELS && bytes <= OCR_AUTO_MAX_BYTES
 }
