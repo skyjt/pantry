@@ -99,6 +99,8 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.groupImgOfferPath, groupId, path),
   openImageViewer: (transferId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.imgOpenViewer, transferId),
+  fitImageViewerWindow: (width: number, height: number): Promise<number> =>
+    ipcRenderer.invoke(IpcChannels.imgFitViewerWindow, width, height),
   saveImageAs: (transferId: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.imgSaveAs, transferId),
   search: (query: string): Promise<SearchResult> =>

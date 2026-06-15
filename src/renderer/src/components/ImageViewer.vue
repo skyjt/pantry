@@ -1,16 +1,14 @@
 <script setup lang="ts">
 // 大图查看器：纯渲染层缩放/旋转/平移，图片源仍走 pantry-img://，另存为走既有 IPC。
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PantryIcon from './PantryIcon.vue'
 
 const props = defineProps<{ src: string; transferId: string }>()
 const emit = defineEmits<{ close: [] }>()
 
-const MIN_ZOOM = 0.08
+const MIN_ZOOM = 0.005
 const MAX_ZOOM = 6
 const ZOOM_STEP = 1.2
-const FIT_PADDING_X = 72
-const FIT_PADDING_Y = 148
 const PAN_STEP = 48
 
 type Point = { x: number; y: number }
@@ -27,6 +25,7 @@ const isDragging = ref(false)
 const viewMode = ref<'fit' | 'free'>('fit')
 
 let dragStart: DragStart | null = null
+let loadToken = 0
 
 const canUseImage = computed(() => !loading.value && !broken.value)
 const zoomLabel = computed(() => `${Math.round(zoom.value * 100)}%`)
@@ -47,8 +46,8 @@ function fitScale(): number {
   if (!natural.value.width || !natural.value.height) return 1
   const imageWidth = isQuarterTurn() ? natural.value.height : natural.value.width
   const imageHeight = isQuarterTurn() ? natural.value.width : natural.value.height
-  const maxWidth = Math.max(240, window.innerWidth - FIT_PADDING_X)
-  const maxHeight = Math.max(180, window.innerHeight - FIT_PADDING_Y)
+  const maxWidth = Math.max(1, window.innerWidth)
+  const maxHeight = Math.max(1, window.innerHeight)
   return clamp(Math.min(maxWidth / imageWidth, maxHeight / imageHeight, 1), MIN_ZOOM, MAX_ZOOM)
 }
 
@@ -104,7 +103,8 @@ async function saveAs(): Promise<void> {
   }
 }
 
-function onImageLoad(event: Event): void {
+async function onImageLoad(event: Event): Promise<void> {
+  const token = ++loadToken
   const image = event.currentTarget as HTMLImageElement
   natural.value = {
     width: image.naturalWidth || 1,
@@ -112,7 +112,18 @@ function onImageLoad(event: Event): void {
   }
   loading.value = false
   broken.value = false
-  void nextTick(applyFit)
+  try {
+    const initialZoom = await window.pantry.fitImageViewerWindow(
+      natural.value.width,
+      natural.value.height
+    )
+    if (token !== loadToken) return
+    zoom.value = clamp(initialZoom, MIN_ZOOM, MAX_ZOOM)
+    centerImage()
+    viewMode.value = zoom.value < 0.999 ? 'fit' : 'free'
+  } catch {
+    if (token === loadToken) applyFit()
+  }
 }
 
 function onImageError(): void {
@@ -211,6 +222,7 @@ function onResize(): void {
 }
 
 function resetState(): void {
+  loadToken += 1
   zoom.value = 1
   rotation.value = 0
   offset.value = { x: 0, y: 0 }
@@ -237,50 +249,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="viewer" role="dialog" aria-modal="true" aria-label="图片查看器">
-    <header class="viewer-top" @click.stop>
-      <div class="viewer-title">
-        <span class="viewer-name">图片查看</span>
-        <span class="viewer-status">{{ broken ? '不可用' : loading ? '加载中' : zoomLabel }}</span>
-      </div>
-      <div class="viewer-tools" role="toolbar" aria-label="图片查看工具">
-        <button class="tool" type="button" title="缩小" :disabled="!canUseImage" @click="zoomOut">
-          <PantryIcon name="zoom-out" :size="17" />
-        </button>
-        <button class="tool" type="button" title="放大" :disabled="!canUseImage" @click="zoomIn">
-          <PantryIcon name="zoom-in" :size="17" />
-        </button>
-        <button
-          class="tool"
-          :class="{ active: viewMode === 'fit' }"
-          type="button"
-          title="适应窗口"
-          :disabled="!canUseImage"
-          :aria-pressed="viewMode === 'fit'"
-          @click="applyFit"
-        >
-          <PantryIcon name="fit-screen" :size="17" />
-        </button>
-        <button class="tool" type="button" title="原始大小" :disabled="!canUseImage" @click="applyActualSize">
-          <PantryIcon name="actual-size" :size="17" />
-        </button>
-        <span class="tool-divider" aria-hidden="true"></span>
-        <button class="tool" type="button" title="向左旋转" :disabled="!canUseImage" @click="rotateImage(-90)">
-          <PantryIcon name="rotate-left" :size="17" />
-        </button>
-        <button class="tool" type="button" title="向右旋转" :disabled="!canUseImage" @click="rotateImage(90)">
-          <PantryIcon name="rotate-right" :size="17" />
-        </button>
-        <span class="tool-divider" aria-hidden="true"></span>
-        <button class="tool" type="button" title="另存为" :disabled="saving || !canUseImage" @click="saveAs">
-          <PantryIcon :name="saving ? 'loader' : 'save'" :size="17" />
-        </button>
-        <button class="tool close" type="button" title="关闭" @click="emit('close')">
-          <PantryIcon name="x" :size="17" />
-        </button>
-      </div>
-    </header>
-
+  <div class="viewer" aria-label="图片查看器">
     <main
       class="viewer-stage"
       :class="{ grabbing: isDragging }"
@@ -304,6 +273,41 @@ onBeforeUnmount(() => {
         @error="onImageError"
       />
     </main>
+
+    <footer class="viewer-menu" role="toolbar" aria-label="图片查看工具" @click.stop>
+      <span class="zoom-readout">{{ broken ? '不可用' : loading ? '加载中' : zoomLabel }}</span>
+      <button class="tool" type="button" title="缩小" :disabled="!canUseImage" @click="zoomOut">
+        <PantryIcon name="zoom-out" :size="17" />
+      </button>
+      <button class="tool" type="button" title="放大" :disabled="!canUseImage" @click="zoomIn">
+        <PantryIcon name="zoom-in" :size="17" />
+      </button>
+      <button
+        class="tool"
+        :class="{ active: viewMode === 'fit' }"
+        type="button"
+        title="适应窗口"
+        :disabled="!canUseImage"
+        :aria-pressed="viewMode === 'fit'"
+        @click="applyFit"
+      >
+        <PantryIcon name="fit-screen" :size="17" />
+      </button>
+      <button class="tool" type="button" title="原始大小" :disabled="!canUseImage" @click="applyActualSize">
+        <PantryIcon name="actual-size" :size="17" />
+      </button>
+      <span class="tool-divider" aria-hidden="true"></span>
+      <button class="tool" type="button" title="向左旋转" :disabled="!canUseImage" @click="rotateImage(-90)">
+        <PantryIcon name="rotate-left" :size="17" />
+      </button>
+      <button class="tool" type="button" title="向右旋转" :disabled="!canUseImage" @click="rotateImage(90)">
+        <PantryIcon name="rotate-right" :size="17" />
+      </button>
+      <span class="tool-divider" aria-hidden="true"></span>
+      <button class="tool" type="button" title="另存为" :disabled="saving || !canUseImage" @click="saveAs">
+        <PantryIcon :name="saving ? 'loader' : 'save'" :size="17" />
+      </button>
+    </footer>
   </div>
 </template>
 
@@ -311,55 +315,41 @@ onBeforeUnmount(() => {
 .viewer {
   position: fixed;
   inset: 0;
-  z-index: 44;
   color: #f5f7f6;
-  background: rgba(10, 12, 11, 0.88);
-  display: flex;
-  flex-direction: column;
+  background: #111412;
   overflow: hidden;
 }
-.viewer-top {
+.viewer-menu {
   position: fixed;
-  top: 18px;
   left: 50%;
+  bottom: 14px;
   transform: translateX(-50%);
-  width: min(760px, calc(100vw - 96px));
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 6px 8px 6px 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 8px;
-  background: rgba(28, 32, 30, 0.86);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(18px);
-  z-index: 45;
-}
-.viewer-title {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-.viewer-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: #ffffff;
-}
-.viewer-status {
-  min-width: 52px;
-  color: rgba(245, 247, 246, 0.68);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.viewer-tools {
+  max-width: calc(100vw - 20px);
+  min-height: 42px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
+  padding: 5px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(28, 32, 30, 0.68);
+  box-shadow:
+    0 16px 40px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(18px);
+  overflow-x: auto;
+  z-index: 2;
+}
+
+.zoom-readout {
+  min-width: 50px;
+  padding: 0 7px 0 5px;
+  color: rgba(245, 247, 246, 0.82);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
 }
 .tool {
   width: 32px;
@@ -391,10 +381,6 @@ onBeforeUnmount(() => {
   color: rgba(245, 247, 246, 0.28);
   cursor: default;
 }
-.tool.close:hover {
-  border-color: rgba(255, 107, 114, 0.42);
-  background: rgba(255, 107, 114, 0.22);
-}
 .tool-divider {
   width: 1px;
   height: 20px;
@@ -402,12 +388,12 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.14);
 }
 .viewer-stage {
-  flex: 1;
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
   overflow: hidden;
-  padding: 74px 36px 36px;
+  padding: 0;
   cursor: default;
   touch-action: none;
 }
@@ -455,25 +441,15 @@ onBeforeUnmount(() => {
 }
 
 @supports not (backdrop-filter: blur(18px)) {
-  .viewer-top {
+  .viewer-menu {
     background: #1c201e;
   }
 }
 
 @media (max-width: 720px) {
-  .viewer-top {
-    top: 10px;
-    width: calc(100vw - 20px);
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .viewer-tools {
-    width: 100%;
-    justify-content: space-between;
-  }
-  .viewer-stage {
-    padding: 104px 14px 22px;
+  .viewer-menu {
+    bottom: 10px;
+    max-width: calc(100vw - 16px);
   }
 }
 

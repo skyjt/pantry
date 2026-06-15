@@ -19,7 +19,7 @@ function viewerHash(transferId: string, name: string): string {
 
 export function openImageViewerWindow(transferId: string, name: string): void {
   const hash = viewerHash(transferId, name)
-  const title = name.trim() ? `${name.trim().slice(0, 80)} - 图片查看` : '图片查看'
+  const title = name.trim() ? name.trim().slice(0, 120) : '图片'
 
   if (win && !win.isDestroyed()) {
     win.setTitle(title)
@@ -35,10 +35,10 @@ export function openImageViewerWindow(transferId: string, name: string): void {
   }
 
   win = new BrowserWindow({
-    width: 900,
-    height: 680,
-    minWidth: 520,
-    minHeight: 360,
+    width: 640,
+    height: 480,
+    minWidth: 280,
+    minHeight: 180,
     show: false,
     title,
     backgroundColor: '#111412',

@@ -139,6 +139,11 @@ if (!gotLock) {
     return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null
   }
 
+  function parseImageDimension(value: unknown): number | null {
+    const n = typeof value === 'number' ? value : NaN
+    return Number.isFinite(n) && n > 0 && n <= 100000 ? Math.floor(n) : null
+  }
+
   /** Linux 窗口图标（决议 #58）：显式设置 _NET_WM_ICON，任务栏不依赖桌面环境的 desktop 关联 */
   function linuxWindowIcon(): { icon: string } | Record<string, never> {
     if (process.platform !== 'linux') return {}
@@ -1121,6 +1126,27 @@ if (!gotLock) {
     if (!view?.savedPath) return false
     openImageViewerWindow(transferId, view.name)
     return true
+  })
+
+  ipcMain.handle(IpcChannels.imgFitViewerWindow, (event, width: unknown, height: unknown): number => {
+    const viewerWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!viewerWindow || viewerWindow === mainWindow) return 1
+    if (!event.sender.getURL().includes('#/image-viewer?')) return 1
+    const imageWidth = parseImageDimension(width)
+    const imageHeight = parseImageDimension(height)
+    if (!imageWidth || !imageHeight) return 1
+
+    const display = screen.getDisplayMatching(viewerWindow.getBounds())
+    const maxWidth = Math.max(1, Math.floor(display.workAreaSize.width * 0.7))
+    const maxHeight = Math.max(1, Math.floor(display.workAreaSize.height * 0.7))
+    const scale = Math.min(1, maxWidth / imageWidth, maxHeight / imageHeight)
+    const contentWidth = Math.max(1, Math.round(imageWidth * scale))
+    const contentHeight = Math.max(1, Math.round(imageHeight * scale))
+
+    if (viewerWindow.isMaximized()) viewerWindow.unmaximize()
+    viewerWindow.setContentSize(contentWidth, contentHeight)
+    viewerWindow.center()
+    return scale
   })
 
   ipcMain.handle(

@@ -39,6 +39,7 @@ export const IpcChannels = {
   groupImgSendBytes: 'group-img:send-bytes',
   groupImgOfferPath: 'group-img:offer-path',
   imgOpenViewer: 'img:open-viewer',
+  imgFitViewerWindow: 'img:fit-viewer-window',
   imgSaveAs: 'img:save-as',
   searchQuery: 'search:query',
   msgSearch: 'msg:search',
@@ -414,6 +415,8 @@ export interface PantryApi {
   offerGroupImagePath(groupId: string, path: string): Promise<MessageView | null>
   /** 在独立图片窗口中查看，不遮挡主聊天窗口 */
   openImageViewer(transferId: string): Promise<boolean>
+  /** 独立图片窗口按图片自然尺寸适配内容区，返回初始缩放比例 */
+  fitImageViewerWindow(width: number, height: number): Promise<number>
   /** 大图查看器"另存为" */
   saveImageAs(transferId: string): Promise<boolean>
   /** 全局搜索（防抖在渲染层做） */
