@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AVATAR_EMOJIS, avatarEmojiIndex, avatarText } from './avatar'
-import { COMPAT_EMOJIS, compatEmojiItem, splitEmojiText } from './compat-emoji'
+import { COMPAT_EMOJIS, compatEmojiItem, emojiSafePlainText, splitEmojiText } from './compat-emoji'
 import { emojiToTwemojiCode, twemojiUrl } from './twemoji-assets'
 
 describe('compat emoji rendering helpers', () => {
@@ -28,6 +28,11 @@ describe('compat emoji rendering helpers', () => {
   it('内置 emoji 有本地渲染元数据', () => {
     expect(compatEmojiItem('👍')).toMatchObject({ label: '赞', mark: '赞' })
     expect(compatEmojiItem('不存在')).toBeUndefined()
+  })
+
+  it('通知等系统文本可把 emoji 降级为占位文案', () => {
+    expect(emojiSafePlainText('收到👍，安排❤️ OK')).toBe('收到[表情]，安排[表情] OK')
+    expect(emojiSafePlainText('👍👍')).toBe('[表情]')
   })
 
   it('映射到本地 Twemoji SVG 资源', () => {

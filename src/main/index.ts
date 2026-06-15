@@ -43,6 +43,10 @@ import { setupTray, stopTrayUnreadFlash, updateTrayUnread } from './windows/tray
 import { openSettingsWindow } from './windows/settings-window'
 import { closeCaptureWindow, openCaptureWindow } from './windows/capture-window'
 import { openImageViewerWindow } from './windows/image-viewer-window'
+import {
+  incomingNotificationOptions,
+  notificationIconPath
+} from './notifications'
 import { StickerRepo } from './store/sticker-repo'
 import { parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
@@ -156,6 +160,16 @@ if (!gotLock) {
       ? join(process.resourcesPath, 'icons/pantry.png')
       : join(app.getAppPath(), 'build/icons/linux/256x256.png')
     return { icon }
+  }
+
+  function systemNotificationIcon(): string | undefined {
+    const icon = notificationIconPath({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      appPath: app.getAppPath()
+    })
+    return icon && existsSync(icon) ? icon : undefined
   }
 
   function showMainWindow(): void {
@@ -500,7 +514,12 @@ if (!gotLock) {
     if (process.platform === 'linux' && process.env['XDG_SESSION_TYPE'] === 'wayland') {
       // Wayland 无法全局抓屏（tech-design §9），降级提示
       if (Notification.isSupported()) {
-        new Notification({ title: '茶话间', body: 'Wayland 下请用系统截图，然后在聊天框 Ctrl+V 发送' }).show()
+        const icon = systemNotificationIcon()
+        new Notification({
+          title: '茶话间',
+          body: 'Wayland 下请用系统截图，然后在聊天框 Ctrl+V 发送',
+          ...(icon ? { icon } : {})
+        }).show()
       }
       return
     }
@@ -549,28 +568,21 @@ if (!gotLock) {
 
     const senderNick = registry?.get(msg.senderId)?.profile.nick ?? '新成员'
     const hidePreview = appState?.config.showMessagePreview === false
-    const previewText = hidePreview
-      ? '收到一条新消息'
-      : msg.text.length > 60
-        ? `${msg.text.slice(0, 60)}…`
-        : msg.text
-
-    // 群消息：标题=群名，正文=「发送人：内容」（微信式，决议 #66）；单聊：标题=发送人昵称
-    const isGroup = msg.convId.startsWith('group:')
-    let title: string
-    let body: string
-    if (isGroup) {
-      const groupName = groups?.get(msg.convId.slice(6))?.name ?? '讨论组'
-      title = msg.mentioned ? `${groupName}（有人@你）` : groupName
-      body = `${senderNick}：${previewText}`
-    } else {
-      title = senderNick
-      body = previewText
-    }
-    const notification = new Notification({
-      title,
-      body,
+    const groupName = msg.convId.startsWith('group:')
+      ? groups?.get(msg.convId.slice(6))?.name
+      : undefined
+    const icon = systemNotificationIcon()
+    // 群消息：标题=群名，正文=「发送人：内容」（微信式，决议 #66）；正文走系统通知安全文本（决议 #108）
+    const options = incomingNotificationOptions({
+      msg,
+      senderNick,
+      groupName,
+      hidePreview,
       silent: appState?.config.sound === 'none'
+    })
+    const notification = new Notification({
+      ...options,
+      ...(icon ? { icon } : {})
     })
     notification.on('click', () => {
       showMainWindow()
