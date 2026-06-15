@@ -62,10 +62,15 @@ function applyWindowTitle(next: SettingsView | null): void {
   document.title = nick ? `${nick}-🍵Pantry` : '茶话间'
 }
 
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'hidden') chatStore.forgetConversationScrolls()
+}
+
 onMounted(async () => {
   void peersStore.init()
   void chatStore.init()
   void groupsStore.init()
+  document.addEventListener('visibilitychange', onVisibilityChange)
   info.value = await window.pantry.getAppInfo()
   settings.value = await window.pantry.getSettings()
   applyAppearance(settings.value)
@@ -79,6 +84,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   stopSettings?.()
 })
 </script>

@@ -96,6 +96,8 @@ const nudgeNow = ref(Date.now())
 const nudgeFeedback = ref<{ text: string; kind: 'ok' | 'warn' } | null>(null)
 let nudgeFeedbackTimer: ReturnType<typeof setTimeout> | null = null
 let nudgeRetryTimer: ReturnType<typeof setInterval> | null = null
+let applyingConversationScroll = false
+const SCROLL_BOTTOM_THRESHOLD = 24
 
 const isGroup = computed(() => chatStore.activeConv?.type === 'group')
 const group = computed(() =>
@@ -243,9 +245,11 @@ onMounted(async () => {
     settings.value = next
     void nextTick(refreshInputFont)
   })
+  applyConversationScroll()
 })
 
 onUnmounted(() => {
+  rememberConversationScroll()
   document.removeEventListener('mousedown', onDocumentPointerDown)
   if (historySearchTimer) clearTimeout(historySearchTimer)
   if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
@@ -311,19 +315,74 @@ function needSeparator(msg: MessageView, index: number): boolean {
 function scrollToBottom(): void {
   void nextTick(() => {
     const el = scrollArea.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (el) applyScrollTop(el.scrollHeight)
   })
 }
 
-watch(() => chatStore.activeConvId, scrollToBottom)
-// 只在"末尾追加"时贴底（向上加载历史是前插，不该滚动）
+function isNearBottom(el = scrollArea.value): boolean {
+  if (!el) return true
+  return el.scrollHeight - el.clientHeight - el.scrollTop <= SCROLL_BOTTOM_THRESHOLD
+}
+
+function rememberConversationScroll(convId = chatStore.activeConvId): void {
+  const el = scrollArea.value
+  if (!el || !convId) return
+  chatStore.rememberConversationScroll(convId, el.scrollTop, isNearBottom(el))
+}
+
+function applyScrollTop(top: number): void {
+  const el = scrollArea.value
+  if (!el) return
+  applyingConversationScroll = true
+  el.scrollTop = top
+  window.requestAnimationFrame(() => {
+    applyingConversationScroll = false
+    rememberConversationScroll()
+  })
+}
+
+function applyConversationScroll(): void {
+  const convId = chatStore.activeConvId
+  const mode = chatStore.openScrollMode
+  if (!convId || mode === 'target') return
+  void nextTick(() => {
+    if (chatStore.activeConvId !== convId) return
+    const el = scrollArea.value
+    if (!el) return
+    const saved = chatStore.scrollPositions[convId]
+    if (mode === 'latest' || !saved || saved.atBottom) {
+      applyScrollTop(el.scrollHeight)
+      return
+    }
+    applyScrollTop(Math.min(saved.top, Math.max(0, el.scrollHeight - el.clientHeight)))
+  })
+}
+
+watch(
+  () => chatStore.activeConvId,
+  (_id, oldId) => {
+    if (oldId) rememberConversationScroll(oldId)
+  }
+)
+
+watch(() => chatStore.openScrollRun, applyConversationScroll)
+
+// 只在"末尾追加"且用户本来在底部附近时贴底；自己发送的消息始终跟随到底部。
 watch(
   () => {
     const list = chatStore.activeMessages
-    return list.length > 0 ? list[list.length - 1].id : ''
+    const tail = list[list.length - 1]
+    return {
+      convId: chatStore.activeConvId ?? '',
+      id: tail?.id ?? '',
+      isMine: tail?.isMine ?? false
+    }
   },
-  (id, oldId) => {
-    if (id && id !== oldId) scrollToBottom()
+  (next, old) => {
+    if (!old || !next.convId || next.convId !== old.convId || !next.id || next.id === old.id) {
+      return
+    }
+    if (isNearBottom() || next.isMine) scrollToBottom()
   }
 )
 // 搜索跳转高亮：滚动到目标消息居中
@@ -341,13 +400,16 @@ watch(
 /** 滚到顶部附近 → 向上加载更早历史，并保持视口位置不跳（F-MSG-5） */
 async function onScroll(): Promise<void> {
   const el = scrollArea.value
-  if (!el || el.scrollTop > 40 || loadingEarlier.value) return
+  if (!el) return
+  rememberConversationScroll()
+  if (applyingConversationScroll || el.scrollTop > 40 || loadingEarlier.value) return
   loadingEarlier.value = true
   const prevHeight = el.scrollHeight
   const loaded = await chatStore.loadEarlier()
   if (loaded > 0) {
     await nextTick()
     el.scrollTop = el.scrollHeight - prevHeight + el.scrollTop
+    rememberConversationScroll()
   }
   loadingEarlier.value = false
 }

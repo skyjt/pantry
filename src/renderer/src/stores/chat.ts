@@ -12,10 +12,26 @@ import type {
 let nudgeClearTimer: ReturnType<typeof setTimeout> | null = null
 let nudgeOpenRun = 0
 
+type ConversationOpenScrollMode = 'restore' | 'latest' | 'target'
+
+interface OpenConversationOptions {
+  scroll?: ConversationOpenScrollMode
+}
+
+interface ConversationScrollPosition {
+  top: number
+  atBottom: boolean
+}
+
 export const useChatStore = defineStore('chat', {
   state: () => ({
     convs: [] as ConversationView[],
     activeConvId: null as string | null,
+    /** 本次打开会话后消息区应如何定位（纯渲染层状态，决议 #111） */
+    openScrollMode: 'latest' as ConversationOpenScrollMode,
+    openScrollRun: 0,
+    /** convId → 离开会话时的滚动位置 */
+    scrollPositions: {} as Record<string, ConversationScrollPosition>,
     /** convId → 已加载消息（按 seq 升序） */
     messages: {} as Record<string, MessageView[]>,
     /** 搜索跳转后的高亮目标（短暂） */
@@ -70,7 +86,7 @@ export const useChatStore = defineStore('chat', {
       })
       window.pantry.onNudgeReceived((event) => {
         const run = ++nudgeOpenRun
-        void this.openConv(event.convId).then(() => {
+        void this.openConv(event.convId, { scroll: 'latest' }).then(() => {
           if (run !== nudgeOpenRun) return
           this.lastNudge = event
           if (nudgeClearTimer) clearTimeout(nudgeClearTimer)
@@ -83,7 +99,7 @@ export const useChatStore = defineStore('chat', {
       })
       // 点系统通知/托盘 → 直达对应会话（F-SYS-2），单聊群聊通用
       window.pantry.onOpenConv((convId) => {
-        void this.openConv(convId)
+        void this.openConv(convId, { scroll: 'latest' })
       })
       // 截图选择"发送"：发到当前会话（无可发送会话则只留在剪贴板）
       window.pantry.onCaptured((bytes) => {
@@ -93,7 +109,11 @@ export const useChatStore = defineStore('chat', {
     },
 
     /** 从通讯录或会话列表进入会话 */
-    async openPeer(peerNodeId: string): Promise<void> {
+    async openPeer(
+      peerNodeId: string,
+      options: OpenConversationOptions = { scroll: 'latest' }
+    ): Promise<void> {
+      const scroll = options.scroll ?? 'latest'
       const conv = await window.pantry.openConversation(peerNodeId)
       if (!conv) return
       this.upsertConversation(conv)
@@ -102,12 +122,14 @@ export const useChatStore = defineStore('chat', {
       if (!this.messages[conv.id]) {
         this.messages[conv.id] = await window.pantry.pageMessages(conv.id, null, 50)
       }
+      this.requestConversationScroll(scroll)
     },
 
     /** 按会话 id 打开（群会话 / 通知跳转通用） */
-    async openConv(convId: string): Promise<void> {
+    async openConv(convId: string, options: OpenConversationOptions = {}): Promise<void> {
+      const scroll = options.scroll ?? 'restore'
       if (convId.startsWith('single:')) {
-        await this.openPeer(convId.slice(7))
+        await this.openPeer(convId.slice(7), { scroll })
         return
       }
       this.activeConvId = convId
@@ -116,6 +138,7 @@ export const useChatStore = defineStore('chat', {
         this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
       }
       await window.pantry.markRead(convId)
+      this.requestConversationScroll(scroll)
     },
 
     /** 搜索结果跳转：载入目标前后窗口并短暂高亮（ui-design §6） */
@@ -135,6 +158,7 @@ export const useChatStore = defineStore('chat', {
       const tail = ctx[ctx.length - 1]
       this.viewingHistory = !(conv && tail && tail.ts >= conv.lastTs)
       this.highlightId = msgId || null
+      this.requestConversationScroll('target')
       setTimeout(() => {
         if (this.highlightId === msgId) this.highlightId = null
       }, 2600)
@@ -145,6 +169,23 @@ export const useChatStore = defineStore('chat', {
       if (!convId) return
       this.messages[convId] = await window.pantry.pageMessages(convId, null, 50)
       this.viewingHistory = false
+      this.requestConversationScroll('latest')
+    },
+
+    requestConversationScroll(mode: ConversationOpenScrollMode): void {
+      this.openScrollMode = mode
+      this.openScrollRun += 1
+    },
+
+    rememberConversationScroll(convId: string, top: number, atBottom: boolean): void {
+      this.scrollPositions[convId] = {
+        top: Math.max(0, Math.round(top)),
+        atBottom
+      }
+    },
+
+    forgetConversationScrolls(): void {
+      this.scrollPositions = {}
     },
 
     upsertConversation(conv: ConversationView): void {
@@ -165,6 +206,7 @@ export const useChatStore = defineStore('chat', {
       await window.pantry.removeConversation(convId)
       if (this.activeConvId === convId) this.activeConvId = null
       delete this.messages[convId]
+      delete this.scrollPositions[convId]
     },
 
     async loadEarlier(): Promise<number> {
