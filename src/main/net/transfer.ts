@@ -25,6 +25,11 @@ export interface OutgoingLookup {
   receiveMessage?: (env: Envelope) => boolean
 }
 
+export type ReadStreamFactory = (
+  path: string,
+  options?: { start?: number }
+) => ReturnType<typeof createReadStream>
+
 /** 发送侧 TCP 服务。事件：'progress'(transferId, bytesDelta)、'served'(transferId) */
 export class TransferServer extends EventEmitter {
   private server: Server | null = null
@@ -32,7 +37,8 @@ export class TransferServer extends EventEmitter {
   constructor(
     private readonly port: number,
     private readonly lookup: OutgoingLookup,
-    private readonly bindAddress?: string
+    private readonly bindAddress?: string,
+    private readonly openReadStream: ReadStreamFactory = createReadStream
   ) {
     super()
   }
@@ -98,30 +104,62 @@ export class TransferServer extends EventEmitter {
         send({ type: 'pull-ok', fileId: file.fileId, len } satisfies PullOkFrame)
 
         const hash = createHash('sha256')
-        // done 帧携带整文件哈希：续传场景也要全量校验 → 哈希从 0 读，发送从 offset 读
-        const hashStream = createReadStream(file.absPath)
+        const asBuffer = (chunk: Buffer | string): Buffer =>
+          Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        const sendDataChunk = (
+          stream: ReturnType<ReadStreamFactory>,
+          chunk: Buffer | string
+        ): void => {
+          const data = asBuffer(chunk)
+          this.emit('progress', pull.transferId, data.length)
+          if (!socket.write(data)) {
+            stream.pause()
+            socket.once('drain', () => stream.resume())
+          }
+        }
+        const finish = (sha256: string): void => {
+          send({ type: 'done', fileId: file.fileId, sha256 } satisfies DoneFrame)
+          busy = false
+        }
+
+        if (offset === 0) {
+          // 首次拉取时同一条读流边发边算哈希；避免大文件先整盘预读导致 UI 长时间 0B。
+          const dataStream = this.openReadStream(file.absPath)
+          dataStream.on('data', (chunk) => {
+            hash.update(asBuffer(chunk))
+            sendDataChunk(dataStream, chunk)
+          })
+          dataStream.on('error', () => socket.destroy())
+          dataStream.on('end', () => finish(hash.digest('hex')))
+          return
+        }
+
+        // 断点续传仍需整文件哈希；数据流先启动，哈希流完成后再发送 done。
+        let dataEnded = len === 0
+        let digest: string | null = null
+        const finishResumeIfReady = (): void => {
+          if (!dataEnded || digest === null) return
+          finish(digest)
+        }
+
+        const hashStream = this.openReadStream(file.absPath)
         hashStream.on('data', (chunk) => hash.update(chunk))
         hashStream.on('error', () => socket.destroy())
         hashStream.on('end', () => {
-          const dataStream =
-            len === 0 ? null : createReadStream(file.absPath, { start: offset })
-          const finish = (): void => {
-            send({ type: 'done', fileId: file.fileId, sha256: hash.digest('hex') } satisfies DoneFrame)
-            busy = false
-          }
-          if (!dataStream) {
-            finish()
-            return
-          }
-          dataStream.on('data', (chunk) => {
-            this.emit('progress', pull.transferId, chunk.length)
-            if (!socket.write(chunk)) {
-              dataStream.pause()
-              socket.once('drain', () => dataStream.resume())
-            }
-          })
-          dataStream.on('error', () => socket.destroy())
-          dataStream.on('end', finish)
+          digest = hash.digest('hex')
+          finishResumeIfReady()
+        })
+
+        if (len === 0) {
+          finishResumeIfReady()
+          return
+        }
+        const dataStream = this.openReadStream(file.absPath, { start: offset })
+        dataStream.on('data', (chunk) => sendDataChunk(dataStream, chunk))
+        dataStream.on('error', () => socket.destroy())
+        dataStream.on('end', () => {
+          dataEnded = true
+          finishResumeIfReady()
         })
       },
       () => socket.destroy(),

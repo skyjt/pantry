@@ -3,12 +3,14 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { Readable } from 'node:stream'
 import {
   TransferServer,
   dedupeTargetPath,
   pullTransfer,
   type IncomingFilePlan,
-  type OutgoingFile
+  type OutgoingFile,
+  type ReadStreamFactory
 } from './transfer'
 
 // 数据面回环测试：真实文件、真实 TCP（127.0.0.1）、真实 SHA-256。
@@ -44,14 +46,18 @@ afterEach(async () => {
 
 let nextPort = 45000 + Math.floor(Math.random() * 1000)
 
-async function startServer(files: Map<string, Map<string, OutgoingFile>>): Promise<number> {
+async function startServer(
+  files: Map<string, Map<string, OutgoingFile>>,
+  openReadStream?: ReadStreamFactory
+): Promise<number> {
   nextPort += 1
   const server = new TransferServer(
     nextPort,
     {
       resolve: (transferId, fileId) => files.get(transferId)?.get(fileId) ?? null
     },
-    '127.0.0.1'
+    '127.0.0.1',
+    openReadStream
   )
   await server.start()
   servers.push(server)
@@ -98,6 +104,34 @@ describe('transfer 数据面回环', () => {
     expect(readFileSync(join(dst, '工程', 'docs', '说明.txt'), 'utf8')).toBe('你好，茶话间')
     expect(readFileSync(join(dst, '工程', 'empty.dat')).length).toBe(0)
     expect(bytes).toBe(big.length + Buffer.byteLength('你好，茶话间'))
+  })
+
+  it('首次拉取时同一读流边发送边计算哈希，避免大文件接受后长时间 0B', async () => {
+    const dst = makeTmp()
+    const body = Buffer.alloc(4096, 0x5a)
+    const readCalls: Array<{ start?: number }> = []
+    const openReadStream: ReadStreamFactory = (_path, options) => {
+      readCalls.push({ start: options?.start })
+      return Readable.from([body]) as ReturnType<ReadStreamFactory>
+    }
+    const outgoing = new Map<string, OutgoingFile>([
+      ['f1', { fileId: 'f1', absPath: 'virtual.bin', size: body.length }]
+    ])
+    const port = await startServer(new Map([['t-streaming', outgoing]]), openReadStream)
+
+    await pullTransfer({
+      host: '127.0.0.1',
+      port,
+      selfId: 'node-receiver',
+      transferId: 't-streaming',
+      files: [{ fileId: 'f1', relPath: 'virtual.bin', size: body.length }],
+      saveDir: dst,
+      cancelRef: { canceled: false, socket: null },
+      onProgress: () => undefined
+    })
+
+    expect(readFileSync(join(dst, 'virtual.bin')).equals(body)).toBe(true)
+    expect(readCalls).toEqual([{ start: undefined }])
   })
 
   it('未被授权的传输拒绝供流（accepted 才可拉取的最小闸门）', async () => {
