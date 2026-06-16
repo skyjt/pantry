@@ -9,6 +9,11 @@ interface ParsedCidr {
   hostCount: number
 }
 
+export interface CidrHostPlan {
+  hosts: string[]
+  rangeCount: number
+}
+
 function parseCidrBase(input: string): ParsedCidr | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/.exec(input.trim())
   if (!m) return null
@@ -45,4 +50,23 @@ export function parseCidr(input: string): string[] | null {
     hosts.push(formatIpv4(addr))
   }
   return hosts
+}
+
+export function buildCidrHostPlan(inputs: string[]): CidrHostPlan {
+  const seenRanges = new Set<string>()
+  const seenHosts = new Set<string>()
+  const hosts: string[] = []
+  for (const input of inputs) {
+    const cidr = normalizeCidr(input)
+    if (!cidr || seenRanges.has(cidr)) continue
+    const parsed = parseCidr(cidr)
+    if (!parsed) continue
+    seenRanges.add(cidr)
+    for (const host of parsed) {
+      if (seenHosts.has(host)) continue
+      seenHosts.add(host)
+      hosts.push(host)
+    }
+  }
+  return { hosts, rangeCount: seenRanges.size }
 }

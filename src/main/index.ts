@@ -37,6 +37,7 @@ import {
   type NudgeResult,
   type PeerView,
   type ProfileSubmit,
+  type ScanProgressView,
   type SettingsView
 } from '../shared/ipc'
 import {
@@ -63,7 +64,7 @@ import {
   notificationIconPath
 } from './notifications'
 import { StickerRepo } from './store/sticker-repo'
-import { normalizeCidr, parseCidr } from './net/cidr'
+import { buildCidrHostPlan, normalizeCidr, parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
 import { GroupRepo } from './store/group-repo'
 import { FilesService } from './services/files'
@@ -132,6 +133,8 @@ if (!gotLock) {
 
   const netState: NetState = { ok: false, udpPort, error: '' }
   const OCR_SOURCE_MAX_BYTES = 25 * 1024 * 1024
+  const GLOBAL_SCAN_HOST_DELAY = 8
+  const GLOBAL_SCAN_PROGRESS_PUSH_INTERVAL = 200
   const imageOcrCache = new ImageOcrResultCache()
   let discovery: Discovery | null = null
   let registry: PeerRegistry | null = null
@@ -156,6 +159,19 @@ if (!gotLock) {
   let nudgeShakeOrigin: [number, number] | null = null
   let nudgeShakeTimers: Array<ReturnType<typeof setTimeout>> = []
   const rangeScanTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  let globalScanTimer: ReturnType<typeof setTimeout> | null = null
+  let globalScanSeq = 0
+  let lastGlobalScanProgressPushAt = 0
+  let globalScanProgress: ScanProgressView = {
+    scanId: 0,
+    status: 'idle',
+    running: false,
+    done: 0,
+    total: 0,
+    rangeCount: 0,
+    startedAt: 0,
+    finishedAt: 0
+  }
 
   function parsePort(value: string | undefined): number | null {
     if (!value) return null
@@ -471,6 +487,97 @@ if (!gotLock) {
       ranges.push({ cidr, addedAt: sources[cidr]?.addedAt ?? now })
     }
     return ranges
+  }
+
+  function collectGlobalScanHosts(): { hosts: string[]; rangeCount: number } {
+    const c = appState?.config
+    if (!c) return { hosts: [], rangeCount: 0 }
+    return buildCidrHostPlan(c.scanRanges)
+  }
+
+  function emitGlobalScanProgress(force = false): void {
+    const now = Date.now()
+    if (
+      !force &&
+      globalScanProgress.running &&
+      now - lastGlobalScanProgressPushAt < GLOBAL_SCAN_PROGRESS_PUSH_INTERVAL
+    ) {
+      return
+    }
+    lastGlobalScanProgressPushAt = now
+    mainWindow?.webContents.send(IpcEvents.netScanProgress, globalScanProgress)
+  }
+
+  function setGlobalScanProgress(patch: Partial<ScanProgressView>, force = false): ScanProgressView {
+    globalScanProgress = { ...globalScanProgress, ...patch }
+    emitGlobalScanProgress(force)
+    return globalScanProgress
+  }
+
+  function startGlobalRangeScan(): ScanProgressView {
+    if (globalScanProgress.running) return globalScanProgress
+    if (!discovery || !appState) {
+      globalScanSeq += 1
+      return setGlobalScanProgress(
+        {
+          scanId: globalScanSeq,
+          status: 'unavailable',
+          running: false,
+          done: 0,
+          total: 0,
+          rangeCount: 0,
+          startedAt: Date.now(),
+          finishedAt: Date.now()
+        },
+        true
+      )
+    }
+
+    const { hosts, rangeCount } = collectGlobalScanHosts()
+    globalScanSeq += 1
+    const scanId = globalScanSeq
+    const now = Date.now()
+    setGlobalScanProgress(
+      {
+        scanId,
+        status: hosts.length > 0 ? 'running' : 'empty',
+        running: hosts.length > 0,
+        done: 0,
+        total: hosts.length,
+        rangeCount,
+        startedAt: now,
+        finishedAt: hosts.length > 0 ? 0 : now
+      },
+      true
+    )
+    if (hosts.length === 0) return globalScanProgress
+
+    let index = 0
+    const tick = (): void => {
+      if (globalScanProgress.scanId !== scanId || !globalScanProgress.running) return
+      const host = hosts[index]
+      if (host && discovery) discovery.probe(host, udpPort)
+      index += 1
+      if (index >= hosts.length) {
+        globalScanTimer = null
+        setGlobalScanProgress(
+          {
+            status: 'done',
+            running: false,
+            done: hosts.length,
+            finishedAt: Date.now()
+          },
+          true
+        )
+        return
+      }
+      setGlobalScanProgress({ done: index })
+      globalScanTimer = setTimeout(tick, GLOBAL_SCAN_HOST_DELAY)
+      globalScanTimer.unref?.()
+    }
+    globalScanTimer = setTimeout(tick, 0)
+    globalScanTimer.unref?.()
+    return globalScanProgress
   }
 
   function hashString(value: string): number {
@@ -1032,6 +1139,7 @@ if (!gotLock) {
       company: c?.company ?? '',
       dept: c?.dept ?? '',
       team: c?.team ?? '',
+      host: appState?.profile.host ?? '',
       avatar: c?.avatar ?? -1,
       setupDone: c?.setupDone ?? true,
       fileDir: c?.fileDir ?? '',
@@ -1356,6 +1464,8 @@ if (!gotLock) {
     if (!hosts) return -1
     return discovery.scanHosts(hosts, udpPort)
   })
+
+  ipcMain.handle(IpcChannels.netScanAllRanges, (): ScanProgressView => startGlobalRangeScan())
 
   ipcMain.handle(IpcChannels.peersSetRemark, (_event, nodeId: unknown, remark: unknown) => {
     if (typeof nodeId !== 'string' || nodeId.length === 0 || nodeId.length > 64) return
@@ -1696,6 +1806,16 @@ if (!gotLock) {
     stopTrayUnreadFlash(tray)
     rangeSync?.stop()
     rangeSync = null
+    if (globalScanTimer) clearTimeout(globalScanTimer)
+    globalScanTimer = null
+    if (globalScanProgress.running) {
+      globalScanProgress = {
+        ...globalScanProgress,
+        status: 'idle',
+        running: false,
+        finishedAt: Date.now()
+      }
+    }
     for (const timer of rangeScanTimers.values()) clearTimeout(timer)
     rangeScanTimers.clear()
     discovery?.stop() // 广播 + 单播 exit，让对端立刻变灰而不是等 90s 超时

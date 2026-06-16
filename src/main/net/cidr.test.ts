@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeCidr, parseCidr, SCAN_MAX_HOSTS } from './cidr'
+import { buildCidrHostPlan, normalizeCidr, parseCidr, SCAN_MAX_HOSTS } from './cidr'
 
 describe('parseCidr（网段扫描）', () => {
   it('/30 展开 2 个主机（去网络与广播地址）', () => {
@@ -35,5 +35,16 @@ describe('parseCidr（网段扫描）', () => {
     const hosts = parseCidr('172.16.0.0/22')
     expect(hosts).toHaveLength(2 ** 10 - 2)
     expect((hosts?.length ?? 0) <= SCAN_MAX_HOSTS).toBe(true)
+  })
+
+  it('buildCidrHostPlan 汇总多个网段并去重主机', () => {
+    const plan = buildCidrHostPlan([
+      '192.168.1.1/30',
+      '192.168.1.0/30',
+      '192.168.1.2/31',
+      'not-a-cidr'
+    ])
+    expect(plan.rangeCount).toBe(1)
+    expect(plan.hosts).toEqual(['192.168.1.1', '192.168.1.2'])
   })
 })

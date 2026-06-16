@@ -51,6 +51,7 @@ export const IpcChannels = {
   settingsSaveApp: 'settings:save-app',
   netAddPeer: 'net:add-peer',
   netScan: 'net:scan',
+  netScanAllRanges: 'net:scan-all-ranges',
   peersSetRemark: 'peers:set-remark',
   uiOpenSettings: 'ui:open-settings',
   groupCreate: 'group:create',
@@ -96,6 +97,8 @@ export const IpcEvents = {
   openConv: 'ui:open-conv',
   /** 设置页保存后广播给所有窗口，统一主题/字体等外观 */
   settingsUpdated: 'settings:updated',
+  /** 主界面全局网段刷新进度 */
+  netScanProgress: 'net:scan-progress',
   /** 窗口最大化状态变化 → 自绘控制按钮切换图标（决议 #49） */
   winMaximizeChanged: 'win:maximized-changed'
 } as const
@@ -123,8 +126,8 @@ export interface PeerView {
   company: string
   dept: string
   team: string
-  avatar: number
   host: string
+  avatar: number
   platform: Platform
   ip: string
   online: boolean
@@ -136,6 +139,19 @@ export interface NetState {
   udpPort: number
   /** 端口被占等启动失败原因；ok 时为空 */
   error: string
+}
+
+export type ScanProgressStatus = 'idle' | 'running' | 'done' | 'empty' | 'unavailable'
+
+export interface ScanProgressView {
+  scanId: number
+  status: ScanProgressStatus
+  running: boolean
+  done: number
+  total: number
+  rangeCount: number
+  startedAt: number
+  finishedAt: number
 }
 
 /** 会话视图：单聊（peerId=节点）或讨论组（peerId=groupId） */
@@ -353,6 +369,7 @@ export interface SettingsView {
   company: string
   dept: string
   team: string
+  host: string
   avatar: number
   setupDone: boolean
   /** 用户自选的文件保存目录；空 = 跟随默认 */
@@ -504,6 +521,8 @@ export interface PantryApi {
   addManualPeer(addr: string): Promise<boolean>
   /** 扫描一个 CIDR 网段；返回探测地址数，非法网段返回 -1 */
   scanRange(cidr: string): Promise<number>
+  /** 扫描所有已保存 CIDR 网段；运行中重复调用返回当前进度 */
+  scanAllRanges(): Promise<ScanProgressView>
   /** 设置联系人本地备注（空串=清除） */
   setPeerRemark(nodeId: string, remark: string): Promise<void>
   /** 打开设置窗口 */
@@ -550,6 +569,8 @@ export interface PantryApi {
   onOpenConv(listener: (convId: string) => void): () => void
   /** 设置变更后同步主窗/设置窗外观 */
   onSettingsUpdated(listener: (settings: SettingsView) => void): () => void
+  /** 主界面全局网段刷新进度 */
+  onScanProgress(listener: (progress: ScanProgressView) => void): () => void
   /** 沉浸式无标题栏（决议 #49）：最小化当前窗口 */
   minimizeWindow(): Promise<void>
   /** 最大化/还原当前窗口；返回切换后是否处于最大化 */

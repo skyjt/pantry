@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import type { AppInfo, SettingsView } from '../../shared/ipc'
+import type { AppInfo, ScanProgressView, SettingsView } from '../../shared/ipc'
 import { usePeersStore } from './stores/peers'
 import { useChatStore } from './stores/chat'
 import PeerList from './components/PeerList.vue'
@@ -56,6 +56,51 @@ const showWizard = ref(false)
 const peersStore = usePeersStore()
 const chatStore = useChatStore()
 let stopSettings: (() => void) | null = null
+let stopScanProgress: (() => void) | null = null
+let scanProgressHideTimer: ReturnType<typeof setTimeout> | null = null
+let railHintTimer: ReturnType<typeof setTimeout> | null = null
+let pendingRailHint: string | null = null
+
+const scanProgress = ref<ScanProgressView>({
+  scanId: 0,
+  status: 'idle',
+  running: false,
+  done: 0,
+  total: 0,
+  rangeCount: 0,
+  startedAt: 0,
+  finishedAt: 0
+})
+const scanProgressVisible = ref(false)
+const hasScanRanges = computed(() => (settings.value?.scanRanges.length ?? 0) > 0)
+const canScanAllRanges = computed(() => hasScanRanges.value && !scanProgress.value.running)
+const scanPercent = computed(() => {
+  const total = scanProgress.value.total
+  if (total <= 0) return 0
+  return Math.max(0, Math.min(100, Math.round((scanProgress.value.done / total) * 100)))
+})
+const scanButtonTitle = computed(() => {
+  if (scanProgress.value.running) {
+    return `扫描中 ${scanProgress.value.done}/${scanProgress.value.total}`
+  }
+  if (!hasScanRanges.value) return '没有已保存扫描网段'
+  return '刷新全局用户'
+})
+const scanProgressTitle = computed(() => `扫描进度 ${scanPercent.value}%`)
+const selfName = computed(() => settings.value?.nick.trim() || '未设置昵称')
+const selfOrgPath = computed(() => {
+  const parts = [settings.value?.company, settings.value?.dept, settings.value?.team]
+    .map((item) => item?.trim())
+    .filter((item): item is string => Boolean(item))
+  return parts.length > 0 ? parts.join(' / ') : '未设置组织信息'
+})
+const selfPortText = computed(() => {
+  if (!settings.value) return '端口未加载'
+  return `端口 UDP ${settings.value.udpPort} / TCP ${settings.value.tcpPort}`
+})
+const selfHostText = computed(() => settings.value?.host.trim() || '主机名未加载')
+const selfNodeShort = computed(() => info.value?.nodeId.slice(0, 8) ?? '加载中')
+const activeRailHint = ref<string | null>(null)
 
 function applyWindowTitle(next: SettingsView | null): void {
   const nick = next?.setupDone ? next.nick.trim() : ''
@@ -64,6 +109,55 @@ function applyWindowTitle(next: SettingsView | null): void {
 
 function onVisibilityChange(): void {
   if (document.visibilityState === 'hidden') chatStore.forgetConversationScrolls()
+}
+
+function clearScanProgressHideTimer(): void {
+  if (scanProgressHideTimer) clearTimeout(scanProgressHideTimer)
+  scanProgressHideTimer = null
+}
+
+function clearRailHintTimer(): void {
+  if (railHintTimer) clearTimeout(railHintTimer)
+  railHintTimer = null
+  pendingRailHint = null
+}
+
+function scheduleRailHint(key: string): void {
+  if (activeRailHint.value === key || pendingRailHint === key) return
+  clearRailHintTimer()
+  pendingRailHint = key
+  railHintTimer = setTimeout(() => {
+    activeRailHint.value = key
+    clearRailHintTimer()
+  }, 520)
+}
+
+function hideRailHint(key?: string): void {
+  clearRailHintTimer()
+  if (!key || activeRailHint.value === key) activeRailHint.value = null
+}
+
+function applyScanProgress(next: ScanProgressView): void {
+  scanProgress.value = next
+  clearScanProgressHideTimer()
+  if (next.running) {
+    scanProgressVisible.value = true
+    return
+  }
+  if (next.status === 'done' && next.total > 0) {
+    scanProgressVisible.value = true
+    scanProgressHideTimer = setTimeout(() => {
+      scanProgressVisible.value = false
+      scanProgressHideTimer = null
+    }, 2200)
+    return
+  }
+  scanProgressVisible.value = false
+}
+
+async function refreshAllUsers(): Promise<void> {
+  if (!canScanAllRanges.value) return
+  applyScanProgress(await window.pantry.scanAllRanges())
 }
 
 onMounted(async () => {
@@ -81,11 +175,15 @@ onMounted(async () => {
     applyAppearance(next)
     applyWindowTitle(next)
   })
+  stopScanProgress = window.pantry.onScanProgress(applyScanProgress)
 })
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange)
   stopSettings?.()
+  stopScanProgress?.()
+  clearScanProgressHideTimer()
+  hideRailHint()
 })
 </script>
 
@@ -96,15 +194,53 @@ onUnmounted(() => {
   <WindowControls />
   <div class="shell">
     <nav class="rail">
-      <AvatarMark
-        class="avatar"
-        :avatar="settings?.avatar ?? -1"
-        :name="settings?.nick ?? '茶'"
-      />
+      <div class="avatar-wrap" aria-label="我的信息">
+        <AvatarMark
+          class="avatar"
+          :avatar="settings?.avatar ?? -1"
+          :name="settings?.nick ?? '茶'"
+        />
+        <div class="self-card" aria-hidden="true">
+          <div class="self-card-head">
+            <AvatarMark
+              class="self-card-avatar"
+              :avatar="settings?.avatar ?? -1"
+              :name="settings?.nick ?? '茶'"
+            />
+            <div class="self-card-title">
+              <div class="self-card-name">{{ selfName }}</div>
+              <div class="self-card-subtitle">本机资料</div>
+            </div>
+          </div>
+          <div class="self-card-body">
+            <div class="self-card-row">
+              <span class="self-card-label">组织</span>
+              <span class="self-card-value">{{ selfOrgPath }}</span>
+            </div>
+            <div class="self-card-grid">
+              <div class="self-card-tile">
+                <span class="self-card-label">主机</span>
+                <span class="self-card-value">{{ selfHostText }}</span>
+              </div>
+              <div class="self-card-tile">
+                <span class="self-card-label">节点</span>
+                <span class="self-card-value">ID {{ selfNodeShort }}</span>
+              </div>
+            </div>
+            <div class="self-card-row">
+              <span class="self-card-label">端口</span>
+              <span class="self-card-value">{{ selfPortText }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
       <button
-        class="rail-btn"
-        :class="{ active: tab === 'chat' }"
-        title="聊天"
+        class="rail-btn rail-hint"
+        :class="{ active: tab === 'chat', 'show-hint': activeRailHint === 'chat' }"
+        data-label="聊天"
+        aria-label="聊天"
+        @pointermove="scheduleRailHint('chat')"
+        @pointerleave="hideRailHint('chat')"
         @click="tab = 'chat'"
       >
         <PantryIcon name="chat" :size="25" />
@@ -113,15 +249,51 @@ onUnmounted(() => {
         }}</span>
       </button>
       <button
-        class="rail-btn"
-        :class="{ active: tab === 'contacts' }"
-        title="通讯录"
+        class="rail-btn rail-hint"
+        :class="{ active: tab === 'contacts', 'show-hint': activeRailHint === 'contacts' }"
+        data-label="通讯录"
+        aria-label="通讯录"
+        @pointermove="scheduleRailHint('contacts')"
+        @pointerleave="hideRailHint('contacts')"
         @click="tab = 'contacts'"
       >
         <PantryIcon name="contacts" :size="25" />
       </button>
       <div class="spacer"></div>
-      <button class="rail-btn" title="设置" @click="openSettings">
+      <div class="rail-scan">
+        <button
+          class="rail-btn rail-hint"
+          :class="{
+            scanning: scanProgress.running,
+            'is-disabled': !canScanAllRanges,
+            'show-hint': activeRailHint === 'scan'
+          }"
+          :aria-disabled="!canScanAllRanges"
+          :data-label="scanButtonTitle"
+          :aria-label="scanButtonTitle"
+          @pointermove="scheduleRailHint('scan')"
+          @pointerleave="hideRailHint('scan')"
+          @click="refreshAllUsers"
+        >
+          <PantryIcon :name="scanProgress.running ? 'loader' : 'refresh'" :size="21" />
+        </button>
+        <div
+          class="rail-progress"
+          :class="{ visible: scanProgressVisible }"
+          :aria-label="scanProgressTitle"
+        >
+          <div class="rail-progress-fill" :style="{ width: `${scanPercent}%` }"></div>
+        </div>
+      </div>
+      <button
+        class="rail-btn rail-hint"
+        :class="{ 'show-hint': activeRailHint === 'settings' }"
+        data-label="设置"
+        aria-label="设置"
+        @pointermove="scheduleRailHint('settings')"
+        @pointerleave="hideRailHint('settings')"
+        @click="openSettings"
+      >
         <PantryIcon name="settings" :size="21" />
       </button>
     </nav>
@@ -166,7 +338,7 @@ onUnmounted(() => {
         <PantryBrandLogo variant="icon" :size="92" class="empty-logo" />
         <div class="brand-title">茶话间</div>
         <p class="quote">{{ quote.text }}</p>
-        <p class="quote-author">—— {{ quote.author }}</p>
+        <p class="quote-author">{{ quote.author }}</p>
         <p class="hint">在「通讯录」里选个人，开始第一句话</p>
       </div>
     </main>
@@ -192,6 +364,15 @@ onUnmounted(() => {
   padding: 38px 0 12px; /* 顶部让出拖拽带与 mac 红绿灯 */
   gap: 8px;
 }
+.avatar-wrap {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+  outline: none;
+}
 .avatar {
   width: 36px;
   height: 36px;
@@ -200,7 +381,112 @@ onUnmounted(() => {
   place-items: center;
   font-weight: 600;
   font-size: 18px;
-  margin-bottom: 8px;
+}
+.self-card {
+  position: absolute;
+  left: 52px;
+  top: -8px;
+  z-index: 30;
+  width: 286px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bubble-peer);
+  color: var(--text-1);
+  box-shadow: 0 18px 42px rgba(20, 28, 24, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translateX(-5px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease,
+    visibility 0s linear 180ms;
+}
+.avatar-wrap:hover .self-card {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(0);
+  transition-delay: 420ms, 420ms, 0s;
+}
+.self-card-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.self-card-avatar {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+}
+.self-card-title {
+  min-width: 0;
+  flex: 1;
+}
+.self-card-name {
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.self-card-subtitle {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-size: 11px;
+  line-height: 1;
+}
+.self-card-body {
+  display: grid;
+  gap: 8px;
+}
+.self-card-row,
+.self-card-tile {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-list);
+}
+.self-card-row {
+  display: grid;
+  gap: 5px;
+}
+.self-card-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(86px, 0.9fr);
+  gap: 8px;
+}
+.self-card-tile {
+  display: grid;
+  gap: 5px;
+}
+.self-card-label {
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1;
+}
+.self-card-value {
+  min-width: 0;
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 .rail-btn {
   position: relative;
@@ -214,10 +500,56 @@ onUnmounted(() => {
   display: grid;
   place-items: center;
 }
+.rail-hint::after {
+  content: attr(data-label);
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 10px);
+  z-index: 25;
+  min-width: max-content;
+  max-width: 160px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: rgba(36, 42, 38, 0.96);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0;
+  white-space: nowrap;
+  box-shadow: 0 8px 18px rgba(18, 24, 20, 0.14);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition:
+    opacity 90ms ease,
+    visibility 0s linear 90ms;
+}
+.rail-hint.show-hint::after {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
 .rail-btn.active,
 .rail-btn:hover {
   background: var(--primary-weak);
   color: var(--primary); /* 选中/悬停茶青高亮，品牌主色点缀 */
+}
+.rail-btn.is-disabled:not(.scanning) {
+  cursor: default;
+  opacity: 0.45;
+}
+.rail-btn.is-disabled:not(.scanning):hover {
+  background: transparent;
+  color: var(--text-2);
+}
+.rail-btn.scanning {
+  background: var(--primary-weak);
+  color: var(--primary);
+  opacity: 1;
+}
+.rail-btn.scanning .pantry-icon {
+  animation: rail-spin 1s linear infinite;
 }
 .rail-badge {
   position: absolute;
@@ -235,6 +567,49 @@ onUnmounted(() => {
 }
 .spacer {
   flex: 1;
+}
+.rail-scan {
+  width: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.rail-progress {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.rail-progress.visible {
+  opacity: 1;
+}
+.rail-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 160ms linear;
+}
+@keyframes rail-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-hint::after,
+  .self-card,
+  .rail-progress,
+  .rail-progress-fill {
+    transition: none;
+  }
+  .rail-btn.scanning .pantry-icon {
+    animation: none;
+  }
 }
 
 /* 栏② 列表 */

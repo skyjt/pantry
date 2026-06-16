@@ -25,6 +25,7 @@ import {
   type PeerView,
   type ProfileSubmit,
   type SearchResult,
+  type ScanProgressView,
   type SettingsView,
   type StickerView,
   type TransferView
@@ -130,6 +131,8 @@ const api: PantryApi = {
   addManualPeer: (addr: string): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.netAddPeer, addr),
   scanRange: (cidr: string): Promise<number> => ipcRenderer.invoke(IpcChannels.netScan, cidr),
+  scanAllRanges: (): Promise<ScanProgressView> =>
+    ipcRenderer.invoke(IpcChannels.netScanAllRanges),
   setPeerRemark: (nodeId: string, remark: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannels.peersSetRemark, nodeId, remark),
   openSettings: (): Promise<void> => ipcRenderer.invoke(IpcChannels.uiOpenSettings),
@@ -177,6 +180,7 @@ const api: PantryApi = {
   onCaptured: (listener) => subscribe<ArrayBuffer>(IpcEvents.captured, listener),
   onOpenConv: (listener) => subscribe<string>(IpcEvents.openConv, listener),
   onSettingsUpdated: (listener) => subscribe<SettingsView>(IpcEvents.settingsUpdated, listener),
+  onScanProgress: (listener) => subscribe<ScanProgressView>(IpcEvents.netScanProgress, listener),
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannels.winMinimize),
   toggleMaximizeWindow: (): Promise<boolean> =>
     ipcRenderer.invoke(IpcChannels.winToggleMaximize),
