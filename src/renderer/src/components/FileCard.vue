@@ -193,13 +193,17 @@ function cancelActiveTransfers(): void {
   border-radius: 8px;
   padding: 10px 12px;
   display: flex;
+  /* 三栏共享同一垂直中心线（决议 #129）：图标、文件名/大小、右侧操作/状态高低一致，
+     无论右侧是单徽标还是 3 个堆叠按钮都不再出现左上右中的错位 */
+  align-items: center;
   gap: 10px;
 }
 .icon {
   color: var(--primary);
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
+  /* 与 FileTypeIcon 的 36px 字形等宽，避免图标溢出小盒子、挤占与文件名的间距 */
+  width: 36px;
+  height: 36px;
   display: grid;
   place-items: center;
 }
