@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import type { AppInfo, ScanProgressView, SettingsView } from '../../shared/ipc'
 import { usePeersStore } from './stores/peers'
 import { useChatStore } from './stores/chat'
@@ -45,7 +45,8 @@ async function chatWith(nodeId: string): Promise<void> {
   tab.value = 'chat'
 }
 
-function openSettings(): void {
+function openSettings(event?: Event): void {
+  releaseRailFocus(event)
   void window.pantry.openSettings()
 }
 const info = ref<AppInfo | null>(null)
@@ -59,6 +60,7 @@ let stopSettings: (() => void) | null = null
 let stopScanProgress: (() => void) | null = null
 let scanProgressHideTimer: ReturnType<typeof setTimeout> | null = null
 let railHintTimer: ReturnType<typeof setTimeout> | null = null
+let railFocusReleaseTimer: ReturnType<typeof setTimeout> | null = null
 let pendingRailHint: string | null = null
 
 const scanProgress = ref<ScanProgressView>({
@@ -137,6 +139,32 @@ function hideRailHint(key?: string): void {
   if (!key || activeRailHint.value === key) activeRailHint.value = null
 }
 
+function clearRailFocusReleaseTimer(): void {
+  if (railFocusReleaseTimer) clearTimeout(railFocusReleaseTimer)
+  railFocusReleaseTimer = null
+}
+
+function releaseRailFocus(event?: Event): void {
+  const eventTarget = event?.currentTarget
+  if (eventTarget instanceof HTMLElement) eventTarget.blur()
+
+  const active = document.activeElement
+  if (active instanceof HTMLElement && active.classList.contains('rail-btn')) active.blur()
+}
+
+function releaseInitialRailFocus(): void {
+  clearRailFocusReleaseTimer()
+  void nextTick(() => {
+    requestAnimationFrame(() => {
+      releaseRailFocus()
+      railFocusReleaseTimer = setTimeout(() => {
+        releaseRailFocus()
+        railFocusReleaseTimer = null
+      }, 0)
+    })
+  })
+}
+
 function applyScanProgress(next: ScanProgressView): void {
   scanProgress.value = next
   clearScanProgressHideTimer()
@@ -155,7 +183,14 @@ function applyScanProgress(next: ScanProgressView): void {
   scanProgressVisible.value = false
 }
 
-async function refreshAllUsers(): Promise<void> {
+function activateTab(next: Tab, event: Event): void {
+  tab.value = next
+  hideRailHint()
+  releaseRailFocus(event)
+}
+
+async function refreshAllUsers(event?: Event): Promise<void> {
+  releaseRailFocus(event)
   if (!canScanAllRanges.value) return
   applyScanProgress(await window.pantry.scanAllRanges())
 }
@@ -176,6 +211,7 @@ onMounted(async () => {
     applyWindowTitle(next)
   })
   stopScanProgress = window.pantry.onScanProgress(applyScanProgress)
+  releaseInitialRailFocus()
 })
 
 onUnmounted(() => {
@@ -184,6 +220,7 @@ onUnmounted(() => {
   stopScanProgress?.()
   clearScanProgressHideTimer()
   hideRailHint()
+  clearRailFocusReleaseTimer()
 })
 </script>
 
@@ -235,13 +272,14 @@ onUnmounted(() => {
         </div>
       </div>
       <button
+        type="button"
         class="rail-btn rail-hint"
         :class="{ active: tab === 'chat', 'show-hint': activeRailHint === 'chat' }"
         data-label="聊天"
         aria-label="聊天"
         @pointermove="scheduleRailHint('chat')"
         @pointerleave="hideRailHint('chat')"
-        @click="tab = 'chat'"
+        @click="activateTab('chat', $event)"
       >
         <PantryIcon name="chat" :size="25" />
         <span v-if="chatStore.totalUnread > 0" class="rail-badge">{{
@@ -249,19 +287,21 @@ onUnmounted(() => {
         }}</span>
       </button>
       <button
+        type="button"
         class="rail-btn rail-hint"
         :class="{ active: tab === 'contacts', 'show-hint': activeRailHint === 'contacts' }"
         data-label="通讯录"
         aria-label="通讯录"
         @pointermove="scheduleRailHint('contacts')"
         @pointerleave="hideRailHint('contacts')"
-        @click="tab = 'contacts'"
+        @click="activateTab('contacts', $event)"
       >
         <PantryIcon name="contacts" :size="25" />
       </button>
       <div class="spacer"></div>
       <div class="rail-scan">
         <button
+          type="button"
           class="rail-btn rail-hint"
           :class="{
             scanning: scanProgress.running,
@@ -273,7 +313,7 @@ onUnmounted(() => {
           :aria-label="scanButtonTitle"
           @pointermove="scheduleRailHint('scan')"
           @pointerleave="hideRailHint('scan')"
-          @click="refreshAllUsers"
+          @click="refreshAllUsers($event)"
         >
           <PantryIcon :name="scanProgress.running ? 'loader' : 'refresh'" :size="21" />
         </button>
@@ -286,13 +326,14 @@ onUnmounted(() => {
         </div>
       </div>
       <button
+        type="button"
         class="rail-btn rail-hint"
         :class="{ 'show-hint': activeRailHint === 'settings' }"
         data-label="设置"
         aria-label="设置"
         @pointermove="scheduleRailHint('settings')"
         @pointerleave="hideRailHint('settings')"
-        @click="openSettings"
+        @click="openSettings($event)"
       >
         <PantryIcon name="settings" :size="21" />
       </button>
@@ -494,11 +535,18 @@ onUnmounted(() => {
   height: 40px;
   border: none;
   border-radius: 8px;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
   background: transparent;
   color: var(--text-2); /* 浅灰底上用深灰图标（决议 #70） */
   cursor: pointer;
   display: grid;
   place-items: center;
+}
+.rail-btn:focus,
+.rail-btn:focus-visible {
+  outline: none;
 }
 .rail-hint::after {
   content: attr(data-label);
