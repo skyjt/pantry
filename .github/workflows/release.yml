@@ -80,7 +80,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deb=$(ls release/Pantry-*-linux-amd64.deb)
+          deb=$(ls release/Teahouse-*-linux-amd64.deb)
           mkdir -p /tmp/deb-verify
           data=$(ar t "$deb" | grep '^data\.tar')
           ar p "$deb" "$data" > "/tmp/deb-verify/$data"
@@ -101,7 +101,7 @@ jobs:
           set -euo pipefail
           cd release
           shopt -s nullglob
-          files=(Pantry-*-linux-amd64.deb Pantry-*-linux-x86_64.AppImage)
+          files=(Teahouse-*-linux-amd64.deb Teahouse-*-linux-x86_64.AppImage)
           if [ "${#files[@]}" -lt 2 ]; then
             ls -la
             echo "Linux 产物数量不足，期望 deb 与 AppImage 各一个。" >&2
@@ -115,8 +115,8 @@ jobs:
           name: pantry-debian10-uos20-x64
           if-no-files-found: error
           path: |
-            release/Pantry-*-linux-amd64.deb
-            release/Pantry-*-linux-x86_64.AppImage
+            release/Teahouse-*-linux-amd64.deb
+            release/Teahouse-*-linux-x86_64.AppImage
             release/SHA256SUMS-debian10-uos20-x64.txt
 
   windows7-x64:
@@ -160,7 +160,7 @@ jobs:
         shell: pwsh
         run: |
           $files = Get-ChildItem release -File | Where-Object {
-            $_.Name -like 'Pantry-*-win-x64-setup.exe' -or $_.Name -like 'Pantry-*-win-x64-portable.exe'
+            $_.Name -like 'Teahouse-*-win-x64-setup.exe' -or $_.Name -like 'Teahouse-*-win-x64-portable.exe'
           }
           if ($files.Count -lt 2) {
             Get-ChildItem release -File | Format-Table Name, Length
@@ -178,8 +178,8 @@ jobs:
           name: pantry-win7-x64
           if-no-files-found: error
           path: |
-            release/Pantry-*-win-x64-setup.exe
-            release/Pantry-*-win-x64-portable.exe
+            release/Teahouse-*-win-x64-setup.exe
+            release/Teahouse-*-win-x64-portable.exe
             release/SHA256SUMS-win7-x64.txt
 
   macos-arm64:
@@ -217,7 +217,7 @@ jobs:
           set -euo pipefail
           cd release
           shopt -s nullglob
-          files=(Pantry-*-mac-arm64.dmg Pantry-*-mac-arm64.zip)
+          files=(Teahouse-*-mac-arm64.dmg Teahouse-*-mac-arm64.zip)
           if [ "${#files[@]}" -lt 2 ]; then
             ls -la
             echo "macOS 产物数量不足，期望 dmg 与 zip 各一个。" >&2
@@ -231,8 +231,8 @@ jobs:
           name: pantry-mac-arm64
           if-no-files-found: error
           path: |
-            release/Pantry-*-mac-arm64.dmg
-            release/Pantry-*-mac-arm64.zip
+            release/Teahouse-*-mac-arm64.dmg
+            release/Teahouse-*-mac-arm64.zip
             release/SHA256SUMS-mac-arm64.txt
 
   publish-github-release:
@@ -308,15 +308,15 @@ jobs:
             echo ""
             echo "| 平台 | 文件 | 说明 |"
             echo "|---|---|---|"
-            echo "| Windows 7 SP1+ x64 | \`Pantry-${VERSION}-win-x64-setup.exe\` | NSIS 安装包 |"
-            echo "| Windows 7 SP1+ x64 | \`Pantry-${VERSION}-win-x64-portable.exe\` | 便携版（免安装） |"
-            echo "| Debian 10 / UOS 20 x64 | \`Pantry-${VERSION}-linux-amd64.deb\` | dpkg 安装包（含信创） |"
-            echo "| Debian 10 / UOS 20 x64 | \`Pantry-${VERSION}-linux-x86_64.AppImage\` | 通用 AppImage |"
-            echo "| macOS arm64（M 系列） | \`Pantry-${VERSION}-mac-arm64.dmg\` | 磁盘映像 |"
-            echo "| macOS arm64（M 系列） | \`Pantry-${VERSION}-mac-arm64.zip\` | 压缩包 |"
+            echo "| Windows 7 SP1+ x64 | \`Teahouse-${VERSION}-win-x64-setup.exe\` | NSIS 安装包 |"
+            echo "| Windows 7 SP1+ x64 | \`Teahouse-${VERSION}-win-x64-portable.exe\` | 便携版（免安装） |"
+            echo "| Debian 10 / UOS 20 x64 | \`Teahouse-${VERSION}-linux-amd64.deb\` | dpkg 安装包（含信创） |"
+            echo "| Debian 10 / UOS 20 x64 | \`Teahouse-${VERSION}-linux-x86_64.AppImage\` | 通用 AppImage |"
+            echo "| macOS arm64（M 系列） | \`Teahouse-${VERSION}-mac-arm64.dmg\` | 磁盘映像 |"
+            echo "| macOS arm64（M 系列） | \`Teahouse-${VERSION}-mac-arm64.zip\` | 压缩包 |"
             echo ""
             echo "> 每个平台产物附 SHA-256 校验清单（\`SHA256SUMS-*.txt\`）。"
-            echo "> macOS 未签名构建，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行 \`xattr -dr com.apple.quarantine /Applications/Pantry.app\`。"
+            echo "> macOS 未签名构建，首次打开需在「系统设置 → 隐私与安全性」中允许，或执行 \`xattr -dr com.apple.quarantine /Applications/Teahouse.app\`。"
           } > release-notes.md
 
           echo "=== release-notes.md ==="
@@ -334,10 +334,10 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-              --title "茶话间 · Pantry ${GITHUB_REF_NAME}" \
+              --title "茶话间 · Teahouse ${GITHUB_REF_NAME}" \
               --notes-file release-notes.md
           else
             gh release create "$GITHUB_REF_NAME" "${files[@]}" --repo "$GITHUB_REPOSITORY" \
-              --title "茶话间 · Pantry ${GITHUB_REF_NAME}" \
+              --title "茶话间 · Teahouse ${GITHUB_REF_NAME}" \
               --notes-file release-notes.md
           fi
