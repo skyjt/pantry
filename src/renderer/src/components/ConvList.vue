@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { ConversationView } from '../../../shared/ipc'
 import { usePeersStore } from '../stores/peers'
 import { useChatStore } from '../stores/chat'
@@ -24,6 +24,31 @@ function convName(conv: ConversationView): string {
 function openMenu(event: MouseEvent, conv: ConversationView): void {
   menu.value = { x: event.clientX, y: event.clientY, conv }
 }
+
+function closeMenu(): void {
+  menu.value = null
+}
+
+// 修复（决议 #128）：右键菜单原来只靠 .pane 的 @click 关闭，点到聊天栏那一侧（另一个组件）
+// 时不会触发，菜单关不掉。改为菜单打开期间挂全局监听——点窗口任意处、再次右键、窗口失焦
+// 都关闭；菜单本体的 @click.stop 保证点菜单项不会被这里误关。
+watch(menu, (open) => {
+  if (open) {
+    document.addEventListener('click', closeMenu)
+    document.addEventListener('contextmenu', closeMenu)
+    window.addEventListener('blur', closeMenu)
+  } else {
+    document.removeEventListener('click', closeMenu)
+    document.removeEventListener('contextmenu', closeMenu)
+    window.removeEventListener('blur', closeMenu)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeMenu)
+  document.removeEventListener('contextmenu', closeMenu)
+  window.removeEventListener('blur', closeMenu)
+})
 
 async function togglePin(): Promise<void> {
   const conv = menu.value?.conv
