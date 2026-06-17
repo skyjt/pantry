@@ -9,6 +9,7 @@ import type {
 } from '../../shared/ipc'
 import type { PeerRegistry } from '../net/peer-registry'
 import { toFtsQuery } from '../store/fts'
+import { parsePkRef, pkPreview } from '../../shared/pk'
 
 // 全局搜索（F-MSG-5 / ui-design §6）：联系人（全量含离线）/ 聊天记录（按会话聚合）/ 文件。
 // 中文按字短语匹配走 FTS5；联系人与文件名走 LIKE（千级数据量足够）。
@@ -26,7 +27,7 @@ export class SearchService {
     this.msgGroupStmt = db.prepare(`
       SELECT m.conv_id AS convId, COUNT(*) AS n, MAX(m.seq) AS latestSeq
       FROM messages_fts f JOIN messages m ON m.id = f.msg_id
-      WHERE messages_fts MATCH ? AND m.kind = 'text'
+      WHERE messages_fts MATCH ? AND m.kind IN ('text', 'pk')
       GROUP BY m.conv_id ORDER BY MAX(m.ts) DESC LIMIT 10
     `)
     this.msgLatestStmt = db.prepare(`
@@ -147,7 +148,7 @@ export class SearchService {
     const clauses = ["conv_id = @convId", "status <> 'recalled'"]
     if (kind === 'image') clauses.push("kind = 'image'")
     else if (kind === 'file') clauses.push("kind = 'file'")
-    else clauses.push("kind IN ('text', 'image', 'file')")
+    else clauses.push("kind IN ('text', 'image', 'file', 'pk')")
 
     const params: Record<string, string | number> = { convId, limit }
     if (fromTs !== undefined) {
@@ -160,7 +161,9 @@ export class SearchService {
     }
     if (query) {
       params.like = `%${escapeLike(query)}%`
-      clauses.push("(content LIKE @like ESCAPE '\\' OR COALESCE(file_ref, '') LIKE @like ESCAPE '\\')")
+      clauses.push(
+        "(content LIKE @like ESCAPE '\\' OR (kind IN ('image', 'file') AND COALESCE(file_ref, '') LIKE @like ESCAPE '\\'))"
+      )
     }
 
     const stmt = this.db.prepare(`
@@ -176,7 +179,7 @@ export class SearchService {
       convId: string
       senderId: string
       isMine: number
-      kind: 'text' | 'file' | 'image'
+      kind: 'text' | 'file' | 'image' | 'pk'
       content: string
       fileRef: string | null
       ts: number
@@ -206,15 +209,20 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`)
 }
 
-function titleOf(kind: 'text' | 'file' | 'image', content: string, fileRef: string | null): string {
+function titleOf(kind: 'text' | 'file' | 'image' | 'pk', content: string, fileRef: string | null): string {
   if (kind === 'text') return '文本消息'
+  if (kind === 'pk') {
+    const ref = parsePkRef(fileRef)
+    return ref ? pkPreview(ref.game) : content || '[PK]'
+  }
   const name = nameFromFileRef(fileRef)
   if (name) return name
   return content.replace(/^\[(文件|图片)\] ?/, '') || (kind === 'image' ? '图片' : '文件')
 }
 
-function snippetOf(kind: 'text' | 'file' | 'image', content: string, title: string): string {
+function snippetOf(kind: 'text' | 'file' | 'image' | 'pk', content: string, title: string): string {
   if (kind === 'text') return content
+  if (kind === 'pk') return title
   const stripped = content.replace(/^\[(文件|图片)\] ?/, '')
   return stripped || title
 }

@@ -7,6 +7,7 @@ import type {
   NudgeEvent,
   NudgeResult
 } from '../../../shared/ipc'
+import type { PkGame } from '../../../shared/pk'
 
 // 主进程聊天数据的投影 + 乐观更新（tech-design §7 状态流）
 let nudgeClearTimer: ReturnType<typeof setTimeout> | null = null
@@ -365,6 +366,12 @@ export const useChatStore = defineStore('chat', {
       const conv = this.activeConv
       if (!conv || conv.type !== 'single') return { ok: false, reason: 'invalid' }
       return window.pantry.sendNudge(conv.peerId)
+    },
+
+    async sendPk(game: PkGame): Promise<boolean> {
+      const conv = this.activeConv
+      if (!conv) return false
+      return this.pushOwn(await window.pantry.sendPk(conv.id, game))
     },
 
     async forward(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> {

@@ -2,6 +2,7 @@
 // 通道名、请求/响应类型、preload 暴露的 API 形状都只在这里定义。
 
 import type { Platform } from './protocol'
+import type { PkGame, PkRefView } from './pk'
 
 export const IpcChannels = {
   appInfo: 'app:info',
@@ -20,6 +21,7 @@ export const IpcChannels = {
   msgResend: 'msg:resend',
   msgRecall: 'msg:recall',
   msgNudge: 'msg:nudge',
+  msgPk: 'msg:pk',
   msgForward: 'msg:forward',
   settingsGet: 'settings:get',
   settingsSaveProfile: 'settings:save-profile',
@@ -182,14 +184,17 @@ export interface FileRefView {
   dir: boolean
 }
 
+export type { PkRefView }
+
 export interface MessageView {
   id: string
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text' | 'file' | 'image' | 'sticker' | 'system'
+  kind: 'text' | 'file' | 'image' | 'sticker' | 'system' | 'pk'
   text: string
   fileRef?: FileRefView
+  pkRef?: PkRefView
   ts: number
   seq: number
   status: 'sending' | 'sent' | 'queued' | 'failed' | 'recalled'
@@ -359,7 +364,7 @@ export interface ConversationMessageHit {
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text' | 'file' | 'image'
+  kind: 'text' | 'file' | 'image' | 'pk'
   title: string
   snippet: string
   fileRef?: FileRefView
@@ -472,6 +477,7 @@ export interface PantryApi {
   resendMessage(msgId: string): Promise<boolean>
   recallMessage(msgId: string): Promise<boolean>
   sendNudge(peerNodeId: string): Promise<NudgeResult>
+  sendPk(convId: string, game: PkGame): Promise<MessageView | null>
   forwardMessage(msgId: string, targets: ForwardTarget[]): Promise<ForwardResult>
   getSettings(): Promise<SettingsView>
   /** 保存资料（向导/设置）：资料有变自动广播刷新全网 */

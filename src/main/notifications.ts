@@ -1,6 +1,7 @@
 import { posix, win32 } from 'node:path'
 import type { MessageView } from '../shared/ipc'
 import { emojiSafePlainText } from '../shared/compat-emoji'
+import { pkPreview } from '../shared/pk'
 
 export interface NotificationIconPathInput {
   platform: NodeJS.Platform
@@ -65,6 +66,7 @@ export function incomingNotificationOptions(input: IncomingNotificationInput): I
 function mediaPreviewText(msg: MessageView): string | null {
   if (msg.kind === 'image') return '[图片]'
   if (msg.kind === 'sticker') return '[表情]'
+  if (msg.kind === 'pk') return msg.pkRef ? pkPreview(msg.pkRef.game) : msg.text
   if (msg.kind === 'file') {
     const name = msg.fileRef?.name?.trim()
     if (name) return msg.fileRef?.dir ? `[文件夹] ${name}` : `[文件] ${name}`

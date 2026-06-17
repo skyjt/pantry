@@ -63,6 +63,51 @@ class FakeGroupRepo {
   }
 }
 
+class FakePkMsgRepo {
+  rows = new Map<string, {
+    id: string
+    conv_id: string
+    sender_id: string
+    is_mine: number
+    kind: string
+    content: string
+    file_ref: string | null
+    ts: number
+    seq: number
+    status: string
+  }>()
+
+  insert(m: {
+    id: string
+    convId: string
+    senderId: string
+    isMine: boolean
+    kind: string
+    content: string
+    fileRef?: string
+    ts: number
+    status: string
+  }): boolean {
+    this.rows.set(m.id, {
+      id: m.id,
+      conv_id: m.convId,
+      sender_id: m.senderId,
+      is_mine: m.isMine ? 1 : 0,
+      kind: m.kind,
+      content: m.content,
+      file_ref: m.fileRef ?? null,
+      ts: m.ts,
+      seq: this.rows.size + 1,
+      status: m.status
+    })
+    return true
+  }
+
+  get(id: string) {
+    return this.rows.get(id)
+  }
+}
+
 function service(opts: {
   selfIp: string
   selfId?: string
@@ -183,6 +228,30 @@ describe('GroupsService 群管理权限', () => {
     })
     messenger.emit('incoming', rename, { address: '172.16.56.1' })
     expect(repo.get('g-vm')?.name).toBe('新群名')
+  })
+})
+
+describe('GroupsService PK', () => {
+  it('群 PK 只发给当前在线成员', () => {
+    const repo = new FakeGroupRepo()
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakePkMsgRepo()
+    const groups = new GroupsService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: repo as unknown as GroupRepo,
+      getSelfIp: () => '10.0.0.1',
+      isOnline: (id) => id === 'node-a'
+    })
+    const group = groups.createGroup('项目组', ['node-a', 'node-b'])
+
+    const view = groups.sendPk(group!.groupId, 'rps')
+    expect(view).toMatchObject({ kind: 'pk', text: '[PK] 猜拳', status: 'sent' })
+    const pkSends = messenger.sent.filter((item) => item.env.type === 'msg')
+    expect(pkSends.map((item) => item.peerId)).toEqual(['node-a'])
+    expect(pkSends[0].env.payload).toMatchObject({ kind: 'pk', game: 'rps', groupId: group!.groupId })
   })
 })
 

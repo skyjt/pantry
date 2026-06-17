@@ -48,6 +48,19 @@ describe('notification helpers', () => {
     ).toBe('[文件] 资料[表情].pdf')
   })
 
+  it('PK 通知只显示玩法，不暴露结果', () => {
+    expect(
+      messageNotificationPreview(
+        makeMessage({
+          kind: 'pk',
+          text: '[PK] 骰子',
+          pkRef: { game: 'dice', result: 6 }
+        }),
+        false
+      )
+    ).toBe('[PK] 骰子')
+  })
+
   it('群通知隐藏预览时不泄露发送人，只保留会话级标题', () => {
     const msg = makeMessage({ convId: 'group:g1', text: '秘密👍' })
     const options = incomingNotificationOptions({

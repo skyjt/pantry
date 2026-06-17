@@ -169,7 +169,7 @@ export const NUDGE_MIN_INTERVAL_MS = TIMINGS.nudgeMinInterval
 export const NUDGE_RATE_WINDOW_MS = TIMINGS.nudgeRateWindow
 export const NUDGE_MAX_PER_WINDOW = TIMINGS.nudgeMaxPerWindow
 
-/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊；recall=撤回指令；nudge=私聊窗口震动 */
+/** 用户消息载荷（§7.1）。text=单聊；group-text=群聊；recall=撤回指令；nudge=私聊窗口震动；pk=分歧解决 */
 export type MsgPayload =
   | {
       kind: 'text'
@@ -179,6 +179,13 @@ export type MsgPayload =
     }
   | {
       kind: 'nudge'
+    }
+  | {
+      kind: 'pk'
+      game: PkGame
+      result: PkResult
+      groupId?: string
+      groupRev?: number
     }
   | {
       kind: 'group-text'
@@ -332,3 +339,4 @@ export const MSG_TYPES = {
   fileCtl: 'file-ctl',
   group: 'group'
 } as const
+import type { PkGame, PkResult } from './pk'

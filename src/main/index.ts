@@ -755,6 +755,7 @@ if (!gotLock) {
         groupRepo: new GroupRepo(db),
         messenger,
         peerClock,
+        isOnline: (peerId) => registry?.get(peerId)?.online === true,
         probe: (peerId) => {
           discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
         }
@@ -812,6 +813,7 @@ if (!gotLock) {
         groupRepo: new GroupRepo(db),
         getSelfIp: currentLocalIpv4,
         peerClock,
+        isOnline: (nodeId) => registry?.get(nodeId)?.online === true,
         resolveDisplayName: resolvePeerDisplayName
       })
       groups.on('message', onMessage)
@@ -1175,6 +1177,14 @@ if (!gotLock) {
       return { ok: false, reason: 'invalid' }
     }
     return chat?.sendNudge(peerId) ?? { ok: false, reason: 'invalid' }
+  })
+
+  ipcMain.handle(IpcChannels.msgPk, (_event, convId: unknown, game: unknown) => {
+    if (typeof convId !== 'string' || convId.length === 0 || convId.length > 128) return null
+    if (game !== 'dice' && game !== 'rps') return null
+    if (convId.startsWith('single:')) return chat?.sendPk(convId.slice(7), game) ?? null
+    if (convId.startsWith('group:')) return groups?.sendPk(convId.slice(6), game) ?? null
+    return null
   })
 
   ipcMain.handle(IpcChannels.msgForward, async (_event, msgId: unknown, targets: unknown) => {

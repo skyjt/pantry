@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomInt, randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   MSG_TYPES,
@@ -23,6 +23,14 @@ import { ConvRepo, convRowToView, type ConvRow } from '../store/conv-repo'
 import { GroupRepo } from '../store/group-repo'
 import { MsgRepo, msgRowToView, type MsgRow } from '../store/msg-repo'
 import type { PeerClock } from '../net/peer-clock'
+import {
+  isPkGame,
+  parsePkRef,
+  pkPreview,
+  type PkGame,
+  type PkRefView,
+  type PkResult
+} from '../../shared/pk'
 
 // 聊天用例编排（tech-design §3）：发消息 = 写库 → 网络 → 状态回推。
 // 事件出口：'message'（新消息入库）、'status'（发送状态变化）、'convs'（会话列表变化）。
@@ -38,6 +46,8 @@ export interface ChatDeps {
   probe?: (peerId: string) => void
   /** 时钟偏移矫正（决议 #65）：把对方消息显示时间换算到本机钟 */
   peerClock?: PeerClock
+  /** 在线即时能力（PK）：发送前确认对端仍在线 */
+  isOnline?: (peerId: string) => boolean
 }
 
 const toConvView = convRowToView
@@ -151,6 +161,38 @@ export class ChatService extends EventEmitter {
     return { ok: true }
   }
 
+  sendPk(peerId: string, game: PkGame): MessageView | null {
+    if (!peerId || peerId.length > 64 || !isPkGame(game)) return null
+    if (!this.deps.isOnline?.(peerId)) return null
+    const convId = this.deps.convRepo.ensureSingle(peerId)
+    const ref = makePkRef(game)
+    const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, this.deps.selfId, {
+      kind: 'pk',
+      game: ref.game,
+      result: ref.result
+    })
+    this.deps.msgRepo.insert({
+      id: env.id,
+      convId,
+      senderId: this.deps.selfId,
+      isMine: true,
+      kind: 'pk',
+      content: pkPreview(game),
+      fileRef: JSON.stringify(ref),
+      ts: env.ts,
+      status: 'sending'
+    })
+    this.deps.convRepo.bump(convId, env.ts)
+    this.emitConvs()
+
+    void this.deps.messenger.sendReliable(peerId, env).then((ok) => {
+      this.applyStatus(env.id, ok ? 'sent' : 'failed')
+    })
+
+    const row = this.deps.msgRepo.get(env.id)
+    return row ? toMsgView(row) : null
+  }
+
   /** 手动重发（失败/排队中的自己的消息）：沿用原 id，对端凭 id 去重 */
   resend(msgId: string): boolean {
     const row = this.deps.msgRepo.get(msgId)
@@ -159,6 +201,25 @@ export class ChatService extends EventEmitter {
     const peerId = row.conv_id.startsWith('single:') ? row.conv_id.slice(7) : ''
     if (!peerId) return false
 
+    if (row.kind === 'pk') {
+      const ref = parsePkRef(row.file_ref)
+      if (!ref) return false
+      const env: Envelope<MsgPayload> = {
+        v: 1,
+        type: MSG_TYPES.msg,
+        id: row.id,
+        from: this.deps.selfId,
+        ts: row.ts,
+        payload: { kind: 'pk', game: ref.game, result: ref.result }
+      }
+      this.applyStatus(msgId, 'sending')
+      void this.deps.messenger.sendReliable(peerId, env).then((ok) => {
+        this.applyStatus(msgId, ok ? 'sent' : 'failed')
+      })
+      return true
+    }
+
+    if (row.kind !== 'text') return false
     const env: Envelope<MsgPayload> = {
       v: 1,
       type: MSG_TYPES.msg,
@@ -222,6 +283,11 @@ export class ChatService extends EventEmitter {
       this.onIncomingNudge(env as Envelope<MsgPayload>)
       return
     }
+    if (payload.kind === 'pk') {
+      if (payload.groupId) return
+      this.onIncomingPk(env as Envelope<MsgPayload>)
+      return
+    }
     if (payload.kind === 'group-text') {
       this.deferPendingRecall(env.id)
       return
@@ -242,6 +308,32 @@ export class ChatService extends EventEmitter {
       status: 'sent'
     })
     if (!inserted) return // 持久化去重之外的最后一道闸（messages 主键幂等）
+    this.deps.convRepo.bump(convId, ts)
+    this.deps.convRepo.incUnread(convId)
+    const row = this.deps.msgRepo.get(env.id)
+    if (row) this.emit('message', toMsgView(row))
+    this.emitConvs()
+    this.deferPendingRecall(env.id)
+  }
+
+  private onIncomingPk(env: Envelope<MsgPayload>): void {
+    const payload = env.payload
+    if (payload.kind !== 'pk' || payload.groupId) return
+    const convId = this.deps.convRepo.ensureSingle(env.from)
+    this.deps.peerClock?.observe(env.from, env.ts, Date.now())
+    const ts = this.deps.peerClock?.correct(env.from, env.ts) ?? env.ts
+    const inserted = this.deps.msgRepo.insert({
+      id: env.id,
+      convId,
+      senderId: env.from,
+      isMine: false,
+      kind: 'pk',
+      content: pkPreview(payload.game),
+      fileRef: JSON.stringify({ game: payload.game, result: payload.result } satisfies PkRefView),
+      ts,
+      status: 'sent'
+    })
+    if (!inserted) return
     this.deps.convRepo.bump(convId, ts)
     this.deps.convRepo.incUnread(convId)
     const row = this.deps.msgRepo.get(env.id)
@@ -319,7 +411,7 @@ export class ChatService extends EventEmitter {
 
   private canRecall(row: MsgRow): boolean {
     if (row.is_mine === 0) return false
-    if (row.kind !== 'text' || row.status === 'recalled') return false
+    if ((row.kind !== 'text' && row.kind !== 'pk') || row.status === 'recalled') return false
     return Date.now() - row.ts <= RECALL_WINDOW_MS
   }
 
@@ -434,4 +526,15 @@ export class ChatService extends EventEmitter {
 
 export function newMsgId(): string {
   return randomUUID()
+}
+
+function makePkRef(game: PkGame): PkRefView {
+  return {
+    game,
+    result: game === 'dice' ? randomInt(1, 7) : randomRps()
+  }
+}
+
+function randomRps(): PkResult {
+  return ['rock', 'paper', 'scissors'][randomInt(0, 3)] as PkResult
 }

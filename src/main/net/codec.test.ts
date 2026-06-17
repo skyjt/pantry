@@ -142,6 +142,33 @@ describe('codec', () => {
     expect(decode(encode(resend))).toEqual({ ok: false, reason: 'bad-payload:msg' })
   })
 
+  it('pk 只接受匹配玩法的结果，且不允许补发标记', () => {
+    const dice = makeEnvelope<MsgPayload>(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'pk',
+      game: 'dice',
+      result: 6
+    })
+    expect(decode(encode(dice))).toMatchObject({ ok: true, known: true })
+
+    const rps = makeEnvelope<MsgPayload>(MSG_TYPES.msg, 'node-aaaa', {
+      kind: 'pk',
+      game: 'rps',
+      result: 'rock',
+      groupId: 'group-1',
+      groupRev: 1
+    })
+    expect(decode(encode(rps))).toMatchObject({ ok: true, known: true })
+
+    expect(
+      decode(encode(makeEnvelope(MSG_TYPES.msg, 'node-aaaa', { kind: 'pk', game: 'dice', result: 7 })))
+    ).toEqual({ ok: false, reason: 'bad-payload:msg' })
+    expect(
+      decode(
+        encode(makeEnvelope(MSG_TYPES.msg, 'node-aaaa', { kind: 'pk', game: 'rps', result: 'rock', resend: true }))
+      )
+    ).toEqual({ ok: false, reason: 'bad-payload:msg' })
+  })
+
   it('scan-ranges 只接受受控 CIDR 列表', () => {
     const ok = makeEnvelope<ScanRangesPayload>(MSG_TYPES.scanRanges, 'node-aaaa', {
       ranges: [{ cidr: '10.1.2.0/24', addedAt: Date.now() }]

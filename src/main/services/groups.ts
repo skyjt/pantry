@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomInt, randomUUID } from 'node:crypto'
 import type { RemoteInfo } from 'node:dgram'
 import { EventEmitter } from 'node:events'
 import {
@@ -18,6 +18,7 @@ import { ConvRepo, convRowToView } from '../store/conv-repo'
 import { MsgRepo, msgRowToView } from '../store/msg-repo'
 import { GroupRepo } from '../store/group-repo'
 import type { PeerClock } from '../net/peer-clock'
+import { isPkGame, pkPreview, type PkGame, type PkRefView, type PkResult } from '../../shared/pk'
 
 // 讨论组编排（§7.4 / F-MSG-4）：
 // 群消息 = 同一信封逐成员单播（离线走补发）；元数据 LWW；
@@ -36,6 +37,8 @@ export interface GroupsDeps {
   peerClock?: PeerClock
   /** 本地显示名解析：群系统提示优先用备注，其次昵称（决议 #87） */
   resolveDisplayName?: (nodeId: string) => string
+  /** 在线即时能力（PK）：群 PK 只发给当前在线成员 */
+  isOnline?: (nodeId: string) => boolean
 }
 
 type GroupPatch = { name?: string; add?: string[]; remove?: string[]; adminPassword?: string }
@@ -198,16 +201,77 @@ export class GroupsService extends EventEmitter {
     return row ? msgRowToView(row) : null
   }
 
+  sendPk(groupId: string, game: PkGame): MessageView | null {
+    const meta = this.deps.groupRepo.get(groupId)
+    if (!meta || !meta.members.includes(this.deps.selfId) || !isPkGame(game)) return null
+    const recipients = meta.members.filter(
+      (member) => member !== this.deps.selfId && this.deps.isOnline?.(member)
+    )
+    if (recipients.length === 0) return null
+
+    const convId = this.deps.convRepo.ensureGroup(groupId)
+    const ref = makePkRef(game)
+    const env = makeEnvelope<MsgPayload>(MSG_TYPES.msg, this.deps.selfId, {
+      kind: 'pk',
+      game: ref.game,
+      result: ref.result,
+      groupId,
+      groupRev: meta.rev
+    })
+    this.deps.msgRepo.insert({
+      id: env.id,
+      convId,
+      senderId: this.deps.selfId,
+      isMine: true,
+      kind: 'pk',
+      content: pkPreview(game),
+      fileRef: JSON.stringify(ref),
+      ts: env.ts,
+      status: 'sent'
+    })
+    this.deps.convRepo.bump(convId, env.ts)
+    this.emitConvs()
+
+    for (const member of recipients) {
+      void this.deps.messenger.sendReliable(member, env)
+    }
+    const row = this.deps.msgRepo.get(env.id)
+    return row ? msgRowToView(row) : null
+  }
+
   // ---------- 入站 ----------
 
   private onIncomingMsg(env: Envelope): void {
     const payload = env.payload as MsgPayload
-    if (payload.kind !== 'group-text' || !payload.groupId) return
+    if ((payload.kind !== 'group-text' && payload.kind !== 'pk') || !payload.groupId) return
 
     const convId = this.deps.convRepo.ensureGroup(payload.groupId)
     // 实时群消息校准时钟偏移；显示时间矫正到本机钟（决议 #65）；排序仍用本地 seq
-    if (!payload.resend) this.deps.peerClock?.observe(env.from, env.ts, Date.now())
+    if (payload.kind === 'pk' || !payload.resend) this.deps.peerClock?.observe(env.from, env.ts, Date.now())
     const ts = this.deps.peerClock?.correct(env.from, env.ts) ?? env.ts
+    if (payload.kind === 'pk') {
+      const inserted = this.deps.msgRepo.insert({
+        id: env.id,
+        convId,
+        senderId: env.from,
+        isMine: false,
+        kind: 'pk',
+        content: pkPreview(payload.game),
+        fileRef: JSON.stringify({ game: payload.game, result: payload.result } satisfies PkRefView),
+        ts,
+        status: 'sent'
+      })
+      if (inserted) {
+        this.deps.convRepo.bump(convId, ts)
+        this.deps.convRepo.incUnread(convId)
+        const row = this.deps.msgRepo.get(env.id)
+        if (row) this.emit('message', msgRowToView(row))
+        this.emitConvs()
+      }
+      this.syncGroupMetaIfNeeded(payload, env.from)
+      return
+    }
+
     const inserted = this.deps.msgRepo.insert({
       id: env.id,
       convId,
@@ -233,10 +297,15 @@ export class GroupsService extends EventEmitter {
     }
 
     // 不认识该群或本地版本落后 → 向发送者索要全量元数据（§7.4）
+    this.syncGroupMetaIfNeeded(payload, env.from)
+  }
+
+  private syncGroupMetaIfNeeded(payload: MsgPayload, from: string): void {
+    if ((payload.kind !== 'group-text' && payload.kind !== 'pk') || !payload.groupId) return
     const meta = this.deps.groupRepo.get(payload.groupId)
     if (!meta || (payload.groupRev ?? 0) > meta.rev) {
       void this.deps.messenger.sendReliable(
-        env.from,
+        from,
         makeEnvelope<GroupPayload>(MSG_TYPES.group, this.deps.selfId, {
           op: 'need',
           groupId: payload.groupId
@@ -425,4 +494,15 @@ function isSelfLeave(local: GroupMeta, incoming: GroupMeta): boolean {
     incoming.adminSecretHash === local.adminSecretHash &&
     incoming.adminHint === local.adminHint
   )
+}
+
+function makePkRef(game: PkGame): PkRefView {
+  return {
+    game,
+    result: game === 'dice' ? randomInt(1, 7) : randomRps()
+  }
+}
+
+function randomRps(): PkResult {
+  return ['rock', 'paper', 'scissors'][randomInt(0, 3)] as PkResult
 }

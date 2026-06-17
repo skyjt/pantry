@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
 import type { DataExportOptions, DataImportResult, ExportFormat } from '../../shared/ipc'
+import { parsePkRef, pkResultText, pkTitle } from '../../shared/pk'
 import { toFtsTokens } from '../store/fts'
 import { isPathInsideAny } from '../util/path-policy'
 import { readZip, writeStoreZip, type ZipEntry } from '../util/zip-store'
@@ -527,7 +528,7 @@ export class PorterService {
 
   private renderText(messages: MessageDump[]): string {
     return messages
-      .map((msg) => `${new Date(msg.ts).toLocaleString('zh-CN')} ${msg.isMine ? '我' : msg.senderId}: ${msg.content}`)
+      .map((msg) => `${new Date(msg.ts).toLocaleString('zh-CN')} ${msg.isMine ? '我' : msg.senderId}: ${messageLabel(msg)}`)
       .join('\n')
   }
 
@@ -538,7 +539,7 @@ export class PorterService {
         (msg) =>
           `<p><time>${escapeHtml(new Date(msg.ts).toLocaleString('zh-CN'))}</time> <b>${escapeHtml(
             msg.isMine ? '我' : msg.senderId
-          )}</b>: ${escapeHtml(msg.content || fileLabel(msg))}</p>`
+          )}</b>: ${escapeHtml(messageLabel(msg))}</p>`
       )
       .join('\n')
     return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(
@@ -554,7 +555,7 @@ function jsonl(rows: unknown[]): string {
 }
 
 function normalizeKind(kind: string): string {
-  return kind === 'file' || kind === 'image' || kind === 'sticker' || kind === 'system'
+  return kind === 'file' || kind === 'image' || kind === 'sticker' || kind === 'system' || kind === 'pk'
     ? kind
     : 'text'
 }
@@ -668,4 +669,12 @@ function fileLabel(msg: MessageDump): string {
   } catch {
     return msg.content
   }
+}
+
+function messageLabel(msg: MessageDump): string {
+  if (msg.kind === 'pk') {
+    const ref = parsePkRef(msg.fileRef)
+    return ref ? `${pkTitle(ref.game)}：${pkResultText(ref)}` : msg.content
+  }
+  return msg.content || fileLabel(msg)
 }

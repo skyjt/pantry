@@ -65,6 +65,7 @@ const api: PantryApi = {
     ipcRenderer.invoke(IpcChannels.msgRecall, msgId),
   sendNudge: (peerNodeId: string): Promise<NudgeResult> =>
     ipcRenderer.invoke(IpcChannels.msgNudge, peerNodeId),
+  sendPk: (convId, game) => ipcRenderer.invoke(IpcChannels.msgPk, convId, game),
   forwardMessage: (msgId: string, targets: ForwardTarget[]): Promise<ForwardResult> =>
     ipcRenderer.invoke(IpcChannels.msgForward, msgId, targets),
   getSettings: (): Promise<SettingsView> => ipcRenderer.invoke(IpcChannels.settingsGet),

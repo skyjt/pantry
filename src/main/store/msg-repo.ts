@@ -1,5 +1,6 @@
 import type DatabaseT from 'better-sqlite3'
-import type { FileRefView, MessageView } from '../../shared/ipc'
+import type { FileRefView, MessageView, PkRefView } from '../../shared/ipc'
+import { parsePkRef } from '../../shared/pk'
 import { toFtsTokens } from './fts'
 
 export interface MsgRow {
@@ -20,7 +21,7 @@ export interface NewMessage {
   convId: string
   senderId: string
   isMine: boolean
-  kind: 'text' | 'file' | 'image' | 'sticker' | 'system'
+  kind: 'text' | 'file' | 'image' | 'sticker' | 'system' | 'pk'
   content: string
   /** 文件消息：FileRefView 的 JSON */
   fileRef?: string
@@ -31,7 +32,10 @@ export interface NewMessage {
 /** 行 → 渲染层视图（chat 与 files 服务共用） */
 export function msgRowToView(row: MsgRow): MessageView {
   let fileRef: FileRefView | undefined
-  if (row.file_ref) {
+  let pkRef: PkRefView | undefined
+  if (row.kind === 'pk') {
+    pkRef = parsePkRef(row.file_ref) ?? undefined
+  } else if (row.file_ref) {
     try {
       fileRef = JSON.parse(row.file_ref) as FileRefView
     } catch {
@@ -47,11 +51,13 @@ export function msgRowToView(row: MsgRow): MessageView {
       row.kind === 'file' ||
       row.kind === 'image' ||
       row.kind === 'sticker' ||
-      row.kind === 'system'
+      row.kind === 'system' ||
+      row.kind === 'pk'
         ? (row.kind as MessageView['kind'])
         : 'text',
     text: row.content,
     fileRef,
+    pkRef,
     ts: row.ts,
     seq: row.seq,
     status: row.status as MessageView['status']

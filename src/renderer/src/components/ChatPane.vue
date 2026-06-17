@@ -13,6 +13,7 @@ import AvatarMark from './AvatarMark.vue'
 import CompatEmoji from './CompatEmoji.vue'
 import FileCard from './FileCard.vue'
 import ImageBubble from './ImageBubble.vue'
+import PkBubble from './PkBubble.vue'
 import EmojiPanel from './EmojiPanel.vue'
 import GroupPanel from './GroupPanel.vue'
 import ForwardDialog from './ForwardDialog.vue'
@@ -24,6 +25,7 @@ import type {
   PeerView,
   SettingsView
 } from '../../../shared/ipc'
+import type { PkGame } from '../../../shared/pk'
 import {
   NUDGE_MIN_INTERVAL_MS,
   RECALL_WINDOW_MS,
@@ -99,6 +101,7 @@ const scrollArea = ref<HTMLElement | null>(null)
 const msgsContent = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLTextAreaElement | null>(null)
 const emojiScope = ref<HTMLElement | null>(null)
+const pkScope = ref<HTMLElement | null>(null)
 const peerProfileScope = ref<HTMLElement | null>(null)
 const historySearchInput = ref<HTMLInputElement | null>(null)
 const inputScrollTop = ref(0)
@@ -140,6 +143,7 @@ const historyHits = ref<ConversationMessageHit[]>([])
 const historySearching = ref(false)
 const historyBrokenImages = ref<Record<string, boolean>>({})
 const showPeerProfile = ref(false)
+const showPk = ref(false)
 const peerProfileRemark = ref('')
 const peerProfileSaving = ref(false)
 const peerProfileSaved = ref(false)
@@ -188,6 +192,11 @@ const onlineGroupRecipientCount = computed(() => {
 const canSendMedia = computed(() =>
   isGroup.value ? canSend.value && onlineGroupRecipientCount.value > 0 : peerOnline.value
 )
+const canSendPk = computed(() =>
+  isGroup.value ? canSend.value && onlineGroupRecipientCount.value > 0 : peerOnline.value
+)
+const pkDisabledReason = computed(() => 'PK 只能和在线的人玩')
+const pkToolTip = computed(() => (canSendPk.value ? 'PK' : pkDisabledReason.value))
 const nudgeRetryRemainingMs = computed(() => Math.max(0, nudgeRetryUntil.value - nudgeNow.value))
 const canSendNudge = computed(
   () => !isGroup.value && peerOnline.value && !nudgeSending.value && nudgeRetryRemainingMs.value <= 0
@@ -286,6 +295,7 @@ function onDocumentPointerDown(event: MouseEvent): void {
   const target = event.target
   if (!(target instanceof Node)) return
   if (showEmoji.value && !emojiScope.value?.contains(target)) showEmoji.value = false
+  if (showPk.value && !pkScope.value?.contains(target)) showPk.value = false
   if (showPeerProfile.value && !peerProfileScope.value?.contains(target)) closePeerProfile()
 }
 
@@ -722,6 +732,7 @@ async function runHistorySearch(): Promise<void> {
 function historyIcon(hit: ConversationMessageHit): string {
   if (hit.kind === 'image') return 'image'
   if (hit.kind === 'file') return 'file'
+  if (hit.kind === 'pk') return 'pk'
   return 'chat'
 }
 
@@ -888,6 +899,12 @@ async function sendNudge(): Promise<void> {
   }
 }
 
+async function sendPk(game: PkGame): Promise<void> {
+  if (!canSendPk.value) return
+  showPk.value = false
+  await chatStore.sendPk(game)
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'v') {
     void sendClipboardImageFallback(event)
@@ -968,13 +985,13 @@ function canCopyMessage(msg: MessageView): boolean {
 }
 
 function canRecallMessage(msg: MessageView): boolean {
-  if (!msg.isMine || msg.kind !== 'text' || msg.status === 'recalled') return false
+  if (!msg.isMine || (msg.kind !== 'text' && msg.kind !== 'pk') || msg.status === 'recalled') return false
   return Date.now() - msg.ts <= RECALL_WINDOW_MS
 }
 
 /** 撤回项是否出现在右键菜单（不含时间判断）：超时也显示，变灰提示"超时"（决议 #63） */
 function isRecallableKind(msg: MessageView): boolean {
-  return msg.isMine && msg.kind === 'text' && msg.status !== 'recalled'
+  return msg.isMine && (msg.kind === 'text' || msg.kind === 'pk') && msg.status !== 'recalled'
 }
 
 // 撤回倒计时（决议 #63）：菜单打开时每 500ms 刷新 nowTs，驱动"撤回（mm:ss）"实时递减
@@ -1008,7 +1025,7 @@ watch(
 )
 
 function canForwardMessage(msg: MessageView): boolean {
-  return msg.status !== 'recalled' && msg.kind !== 'system'
+  return msg.status !== 'recalled' && msg.kind !== 'system' && msg.kind !== 'pk'
 }
 
 function messageMenuItemCount(msg: MessageView): number {
@@ -1442,6 +1459,17 @@ async function onDrop(event: DragEvent): Promise<void> {
               class="message-surface"
               @forward="forwardMsg = msg"
             />
+            <PkBubble
+              v-else-if="msg.kind === 'pk'"
+              :msg="msg"
+              :mine="msg.isMine"
+              :show-action="!msg.isMine"
+              :action-disabled="!canSendPk"
+              :disabled-reason="pkDisabledReason"
+              class="message-surface"
+              @participate="sendPk"
+              @contextmenu.prevent.stop="openMessageMenu($event, msg)"
+            />
             <div
               v-else
               class="bubble message-surface"
@@ -1549,6 +1577,32 @@ async function onDrop(event: DragEvent): Promise<void> {
               @click="showEmoji = !showEmoji"
             >
               <PantryIcon name="smile" :size="18" />
+            </button>
+          </span>
+        </span>
+        <span ref="pkScope" class="pk-scope">
+          <div v-if="showPk" class="pk-popover">
+            <button type="button" :disabled="!canSendPk" @click="sendPk('rps')">
+              <span class="pk-option-rps">✌</span>
+              <span>猜拳</span>
+            </button>
+            <button type="button" :disabled="!canSendPk" @click="sendPk('dice')">
+              <span class="pk-option-dice" aria-hidden="true">
+                <span></span><span></span><span></span><span></span>
+              </span>
+              <span>骰子</span>
+            </button>
+          </div>
+          <span class="tool-wrap" :data-tip="pkToolTip">
+            <button
+              class="tool"
+              :class="{ active: showPk }"
+              type="button"
+              aria-label="PK"
+              @click="showPk = !showPk"
+            >
+              <PantryIcon name="pk" :size="18" />
+              <span class="pk-tool-text">PK</span>
             </button>
           </span>
         </span>
@@ -1725,6 +1779,67 @@ async function onDrop(event: DragEvent): Promise<void> {
   display: inline-grid;
   place-items: center;
 }
+.pk-scope {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+.pk-popover {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(2, 68px);
+  gap: 6px;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-window);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  z-index: 28;
+}
+.pk-popover button {
+  height: 62px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-1);
+  display: grid;
+  grid-template-rows: 30px 18px;
+  place-items: center;
+  gap: 2px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pk-popover button:hover:not(:disabled) {
+  background: var(--line);
+}
+.pk-popover button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+.pk-option-rps {
+  color: var(--primary);
+  font-size: 24px;
+  line-height: 1;
+}
+.pk-option-dice {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 5px;
+  border: 1.5px solid var(--primary);
+  border-radius: 6px;
+}
+.pk-option-dice span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--primary);
+}
 .history-search-scope {
   position: relative;
   display: inline-grid;
@@ -1831,6 +1946,16 @@ async function onDrop(event: DragEvent): Promise<void> {
   border-radius: 4px;
   display: grid;
   place-items: center;
+  position: relative;
+}
+.pk-tool-text {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 700;
+  color: currentColor;
 }
 .tool-wrap {
   position: relative;

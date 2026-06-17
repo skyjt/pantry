@@ -290,6 +290,17 @@ try {
     ts: 5000,
     status: 'sent'
   })
+  msgRepo.insert({
+    id: 'm-pk-search',
+    convId,
+    senderId: 'node-bob',
+    isMine: false,
+    kind: 'pk',
+    content: '[PK] 骰子',
+    fileRef: JSON.stringify({ game: 'dice', result: 6 }),
+    ts: 6000,
+    status: 'sent'
+  })
   const sr = searchSvc.query('文档')
   assert.ok(sr.messageGroups.length >= 1, '聊天记录应有聚合命中')
   assert.equal(sr.messageGroups[0].convId, 'conv-1', '命中应来自含「文档」的会话')
@@ -318,8 +329,23 @@ try {
     searchSvc
       .conversation({ convId, query: '', kind: 'all', limit: 2 })
       .map((h) => h.msgId),
-    ['m-img-search', 'm-f1'],
+    ['m-pk-search', 'm-img-search'],
     '会话内搜索无关键词时应返回当前会话最近记录'
+  )
+  assert.deepEqual(
+    searchSvc
+      .conversation({ convId, query: 'PK', kind: 'all', limit: 1 })
+      .map((h) => h.snippet),
+    ['[PK] 骰子'],
+    '会话内 PK 搜索只展示安全摘要'
+  )
+  assert.deepEqual(
+    searchSvc
+      .conversation({ convId, query: '6', kind: 'all' })
+      .filter((h) => h.msgId === 'm-pk-search')
+      .map((h) => h.msgId),
+    [],
+    '会话内 PK 搜索不应匹配 file_ref 里的真实点数'
   )
   assert.deepEqual(
     searchSvc

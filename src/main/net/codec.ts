@@ -24,6 +24,7 @@ import {
   type ScanRangesPayload
 } from '../../shared/protocol'
 import { PEERS_PER_PACKET } from '../../shared/protocol'
+import { isPkGame, isPkRef } from '../../shared/pk'
 import { normalizeCidr } from './cidr'
 
 // 信封编解码 + 入站校验（protocol §1/§4）：
@@ -98,12 +99,30 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
     case MSG_TYPES.msg: {
       if (!isRecord(payload)) return false
       const m = payload as Partial<MsgPayload>
-      if (m.kind !== 'text' && m.kind !== 'group-text' && m.kind !== 'recall' && m.kind !== 'nudge') {
+      if (
+        m.kind !== 'text' &&
+        m.kind !== 'group-text' &&
+        m.kind !== 'recall' &&
+        m.kind !== 'nudge' &&
+        m.kind !== 'pk'
+      ) {
         return false
       }
       const resend = (m as { resend?: unknown }).resend
       if (resend !== undefined && typeof resend !== 'boolean') return false
       if (m.kind === 'nudge') return resend === undefined
+      if (m.kind === 'pk') {
+        if (resend !== undefined) return false
+        if (!isPkGame(m.game)) return false
+        if (!isPkRef({ game: m.game, result: m.result })) return false
+        if (m.groupId !== undefined) {
+          if (!isStr(m.groupId, LIMITS.id)) return false
+          if (!isInt(m.groupRev) || m.groupRev < 0) return false
+        } else if (m.groupRev !== undefined) {
+          return false
+        }
+        return true
+      }
       if (m.kind === 'recall') {
         if (!isStr(m.targetId, LIMITS.id)) return false
         if (m.groupId !== undefined) {

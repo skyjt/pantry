@@ -285,3 +285,73 @@ describe('ChatService 私聊窗口震动', () => {
     expect(convRepo.unread).toHaveLength(0)
   })
 })
+
+describe('ChatService PK', () => {
+  it('发送 PK 走在线即时可靠通道，失败重试复用同一结果', async () => {
+    const msgRepo = new FakeMsgRepo()
+    const messenger = new FakeMessenger()
+    messenger.reliableResult = false
+    const chat = new ChatService({
+      selfId: 'node-self',
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger,
+      isOnline: (id) => id === 'node-peer'
+    })
+
+    const view = chat.sendPk('node-peer', 'dice')
+    expect(view).toMatchObject({ kind: 'pk', text: '[PK] 骰子', status: 'sending' })
+    expect(messenger.reliableSent).toHaveLength(1)
+    const firstPayload = messenger.reliableSent[0].env.payload
+    expect(firstPayload).toMatchObject({ kind: 'pk', game: 'dice' })
+    await Promise.resolve()
+    expect(msgRepo.get(view!.id)?.status).toBe('failed')
+
+    messenger.reliableResult = true
+    expect(chat.resend(view!.id)).toBe(true)
+    expect(messenger.reliableSent).toHaveLength(2)
+    expect(messenger.reliableSent[1].env.id).toBe(view!.id)
+    expect(messenger.reliableSent[1].env.payload).toEqual(firstPayload)
+  })
+
+  it('收到 PK 落库为安全摘要，真实结果只放 file_ref', () => {
+    const msgRepo = new FakeMsgRepo()
+    const messenger = new FakeMessenger()
+    const chat = new ChatService({
+      selfId: 'node-self',
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger
+    })
+    const messages: Array<{ kind: string; text: string; pkRef?: unknown }> = []
+    chat.on('message', (msg: { kind: string; text: string; pkRef?: unknown }) => messages.push(msg))
+
+    messenger.emit('incoming', {
+      v: 1,
+      type: 'msg',
+      id: 'pk-1',
+      from: 'node-peer',
+      ts: Date.now(),
+      payload: { kind: 'pk', game: 'rps', result: 'scissors' }
+    } satisfies Envelope<MsgPayload>)
+
+    expect(msgRepo.inserted[0]).toMatchObject({
+      id: 'pk-1',
+      convId: 'single:node-peer',
+      kind: 'pk',
+      content: '[PK] 猜拳',
+      status: 'sent'
+    })
+    expect(JSON.parse(msgRepo.inserted[0].fileRef ?? '{}')).toEqual({
+      game: 'rps',
+      result: 'scissors'
+    })
+    expect(messages[0]).toMatchObject({
+      kind: 'pk',
+      text: '[PK] 猜拳',
+      pkRef: { game: 'rps', result: 'scissors' }
+    })
+  })
+})
