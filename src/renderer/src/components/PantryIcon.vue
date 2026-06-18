@@ -67,13 +67,13 @@ withDefaults(
       <path d="m19.2 8.8 1.6-1.6" />
       <path d="M19.7 12h1.7" />
     </g>
-    <g v-else-if="name === 'pk'">
-      <path d="M4 8.5h2.5a4 4 0 0 1 4 4 4 4 0 0 1-4 4H4a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z" />
-      <path d="M20 8.5h-2.5a4 4 0 0 0-4 4 4 4 0 0 0 4 4H20a1 1 0 0 0 1-1v-6a1 1 0 0 0-1-1Z" />
-      <path d="M10.3 11a1.8 1.8 0 0 0-1.8-1.8" />
-      <path d="M13.7 11a1.8 1.8 0 0 1 1.8-1.8" />
-      <path d="M3 11.8h2" />
-      <path d="M21 11.8h-2" />
+    <!-- PK 入口：斜体 PK 字标（决议 #144），skewX 右倾营造竞技动感，加粗描边更醒目 -->
+    <g v-else-if="name === 'pk'" transform="translate(2.2 0) skewX(-10)">
+      <path stroke-width="2" d="M5.6 5v14" />
+      <path stroke-width="2" d="M5.6 5h3.4c2.4 0 2.4 6 0 6H5.6" />
+      <path stroke-width="2" d="M14 5v14" />
+      <path stroke-width="2" d="M14 12 18.6 5" />
+      <path stroke-width="2" d="M14 12 18.6 19" />
     </g>
     <g v-else-if="name === 'pk-rps'">
       <circle cx="8.8" cy="16.2" r="2" />

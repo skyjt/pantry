@@ -1795,9 +1795,9 @@ async function onDrop(event: DragEvent): Promise<void> {
 }
 .pk-popover {
   position: absolute;
-  left: 50%;
+  /* 左对齐按钮向右展开：PK 按钮太靠近聊天面板左缘，居中弹出会让浮层左侧溢出 .chat 的 overflow:hidden 被裁切（决议 #144） */
+  left: 0;
   bottom: calc(100% + 8px);
-  transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(2, 74px);
   gap: 6px;
