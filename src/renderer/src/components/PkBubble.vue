@@ -78,8 +78,8 @@ const cubeStyle = computed(() => ({
 const resultText = computed(() => {
   if (!finalRef.value) return props.msg.text
   if (settled.value) return pkResultText(finalRef.value)
-  if (game.value === 'dice') return '投掷中…'
-  return pkResultText(rolling.value ?? finalRef.value)
+  // 揭晓动画过程中文字固定，避免「出了石头/剪刀/布」随翻牌轮播乱跳（决议 #146）；翻牌手势图仍由 rolling 轮播
+  return game.value === 'dice' ? '投掷中…' : '出拳中…'
 })
 
 let tickTimer: ReturnType<typeof setInterval> | null = null
