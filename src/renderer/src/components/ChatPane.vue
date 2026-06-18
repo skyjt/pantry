@@ -1588,7 +1588,7 @@ async function onDrop(event: DragEvent): Promise<void> {
               :title="canSendPk ? '猜拳' : pkDisabledReason"
               @click="sendPk('rps')"
             >
-              <PantryIcon name="pk-rps" :size="24" />
+              <span class="pk-pop-window"><PantryIcon name="pk-rps" :size="22" /></span>
               <span>猜拳</span>
             </button>
             <button
@@ -1597,13 +1597,13 @@ async function onDrop(event: DragEvent): Promise<void> {
               :title="canSendPk ? '骰子' : pkDisabledReason"
               @click="sendPk('dice')"
             >
-              <PantryIcon name="pk-dice" :size="24" />
+              <span class="pk-pop-window"><PantryIcon name="pk-dice" :size="22" /></span>
               <span>骰子</span>
             </button>
           </div>
           <span class="tool-wrap" :data-tip="pkToolTip">
             <button
-              class="tool"
+              class="tool pk-tool"
               :class="{ active: showPk }"
               type="button"
               aria-label="PK"
@@ -1611,7 +1611,7 @@ async function onDrop(event: DragEvent): Promise<void> {
               :aria-expanded="showPk ? 'true' : 'false'"
               @click="showPk = !showPk"
             >
-              <PantryIcon name="pk" :size="18" />
+              <PantryIcon name="pk" :size="17" />
               <span class="pk-tool-text">PK</span>
             </button>
           </span>
@@ -1800,45 +1800,59 @@ async function onDrop(event: DragEvent): Promise<void> {
   bottom: calc(100% + 8px);
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(2, 70px);
-  gap: 8px;
+  grid-template-columns: repeat(2, 74px);
+  gap: 6px;
   padding: 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg-window);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.13);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.14);
   z-index: 28;
 }
 .pk-popover button {
-  height: 60px;
+  padding: 8px 6px 7px;
   border: 1px solid transparent;
   border-radius: 8px;
   background: transparent;
   color: var(--text-1);
-  display: grid;
-  grid-template-rows: 28px 18px;
-  place-items: center;
-  gap: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 100ms ease;
+  transition: background 140ms ease, transform 120ms ease;
 }
-.pk-popover button .pantry-icon {
+/* 玩法卡的图标小窗：与 PkBubble 开奖窗同底（--bg-chat）、同茶青语义，让浮层与气泡视觉呼应 */
+.pk-pop-window {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--bg-chat);
+  border: 1px solid var(--line);
   color: var(--primary);
+  transition: border-color 140ms ease, background 140ms ease;
 }
 .pk-popover button:hover:not(:disabled) {
-  background: rgba(61, 139, 107, 0.1);
-  border-color: rgba(61, 139, 107, 0.22);
+  background: var(--primary-weak);
+  transform: translateY(-1px);
+}
+.pk-popover button:hover:not(:disabled) .pk-pop-window {
+  border-color: var(--primary);
+  background: var(--bg-window);
 }
 .pk-popover button:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: translateY(0);
 }
 .pk-popover button:focus-visible {
   outline: 2px solid rgba(61, 139, 107, 0.35);
   outline-offset: 2px;
 }
 .pk-popover button:disabled {
-  opacity: 0.38;
+  opacity: 0.4;
   cursor: default;
 }
 .history-search-scope {
@@ -1949,13 +1963,18 @@ async function onDrop(event: DragEvent): Promise<void> {
   place-items: center;
   position: relative;
 }
+.pk-tool {
+  width: auto;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .pk-tool-text {
-  position: absolute;
-  right: 1px;
-  bottom: 1px;
-  font-size: 7.5px;
+  font-size: 11px;
   line-height: 1;
   font-weight: 700;
+  letter-spacing: 0.2px;
   color: currentColor;
 }
 .tool-wrap {

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { MessageView, PkRefView } from '../../../shared/ipc'
-import { pkResultText, pkTitle, type PkGame, type PkRpsResult } from '../../../shared/pk'
+import { pkLabel, pkResultText, type PkGame, type PkRpsResult } from '../../../shared/pk'
 import { emojiToTwemojiCode, twemojiUrl } from '../utils/twemoji-assets'
+import PantryIcon from './PantryIcon.vue'
 
 const props = defineProps<{
   msg: MessageView
@@ -19,14 +20,18 @@ const reduceMotion =
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const rolling = ref<PkRefView | null>(finalRef.value)
 const settled = ref(!(finalRef.value && Date.now() - props.msg.ts < 5000 && !reduceMotion))
+// 定格后短暂置真，触发开奖窗一次性的回弹 + 高亮揭晓动画；历史消息与 reduced-motion 不触发
+const justSettled = ref(false)
 let tickTimer: ReturnType<typeof setInterval> | null = null
 let settleTimer: ReturnType<typeof setTimeout> | null = null
+let revealTimer: ReturnType<typeof setTimeout> | null = null
 
 const currentRef = computed(() => (settled.value ? finalRef.value : rolling.value) ?? finalRef.value)
 const game = computed(() => finalRef.value?.game ?? 'dice')
+const label = computed(() => pkLabel(game.value))
+const chipIcon = computed(() => (game.value === 'dice' ? 'pk-dice' : 'pk-rps'))
 const actionText = computed(() => (game.value === 'dice' ? '掷一下' : '我也来'))
 const resultText = computed(() => (currentRef.value ? pkResultText(currentRef.value) : props.msg.text))
-const title = computed(() => pkTitle(game.value))
 const rpsSrc = computed(() => {
   const result = currentRef.value?.result
   if (game.value !== 'rps' || typeof result !== 'string') return ''
@@ -57,14 +62,17 @@ onMounted(() => {
   }, 90)
   settleTimer = setTimeout(() => {
     settled.value = true
+    justSettled.value = true
     if (tickTimer) clearInterval(tickTimer)
     tickTimer = null
+    revealTimer = setTimeout(() => (justSettled.value = false), 620)
   }, 1500)
 })
 
 onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer)
   if (settleTimer) clearTimeout(settleTimer)
+  if (revealTimer) clearTimeout(revealTimer)
 })
 
 function randomRef(nextGame: PkGame): PkRefView {
@@ -74,22 +82,23 @@ function randomRef(nextGame: PkGame): PkRefView {
 </script>
 
 <template>
-  <span class="pk-wrap">
-    <div class="pk-bubble" :class="{ mine }">
-      <div class="pk-title">{{ title }}</div>
-      <div class="pk-stage" :class="{ rolling: !settled }">
-        <div v-if="game === 'dice'" class="dice-face" :aria-label="`${diceValue} 点`">
-          <span v-for="index in 9" :key="index" class="dice-cell">
-            <span v-if="diceDots.has(index - 1)" class="dice-dot"></span>
-          </span>
-        </div>
-        <img v-else-if="rpsSrc" class="rps-hand" :src="rpsSrc" alt="" draggable="false" />
+  <div class="pk-bubble" :class="{ mine }">
+    <span class="pk-chip">
+      <PantryIcon :name="chipIcon" :size="14" />
+      <span>{{ label }}</span>
+    </span>
+    <div class="pk-stage" :class="{ rolling: !settled, reveal: justSettled }">
+      <div v-if="game === 'dice'" class="dice-face" :aria-label="`${diceValue} 点`">
+        <span v-for="index in 9" :key="index" class="dice-cell">
+          <span v-if="diceDots.has(index - 1)" class="dice-dot"></span>
+        </span>
       </div>
-      <div class="pk-result">{{ resultText }}</div>
+      <img v-else-if="rpsSrc" class="rps-hand" :src="rpsSrc" alt="" draggable="false" />
     </div>
+    <div class="pk-result">{{ resultText }}</div>
     <button
       v-if="showAction"
-      class="pk-action"
+      class="pk-join"
       type="button"
       :disabled="actionDisabled"
       :title="actionDisabled ? disabledReason : actionText"
@@ -97,115 +106,168 @@ function randomRef(nextGame: PkGame): PkRefView {
     >
       {{ actionText }}
     </button>
-  </span>
+  </div>
 </template>
 
 <style scoped>
-.pk-wrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  vertical-align: top;
-}
+/* 茶青描边的明暗两套取值用局部变量承载——Chrome 108 不支持 color-mix，只能预置 rgba */
 .pk-bubble {
+  --pk-edge: rgba(61, 139, 107, 0.22);
   box-sizing: border-box;
-  width: 184px;
-  padding: 9px 10px 10px;
+  width: 156px;
+  padding: 9px 10px;
   border-radius: 8px;
   background: var(--bubble-peer);
-  border: 1px solid rgba(61, 139, 107, 0.18);
-  border-left-color: rgba(61, 139, 107, 0.72);
-  border-left-width: 2px;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+}
+html[data-theme='dark'] .pk-bubble {
+  --pk-edge: rgba(91, 191, 145, 0.32);
 }
 .pk-bubble.mine {
   background: var(--bubble-mine);
 }
-.pk-title {
+.pk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px 2px 7px;
+  border-radius: 999px;
+  background: var(--primary-weak);
+  border: 1px solid var(--pk-edge);
   color: var(--primary);
   font-size: 12px;
   font-weight: 600;
-  line-height: 1.2;
-  margin-bottom: 4px;
+  line-height: 1.35;
 }
+.pk-chip .pantry-icon {
+  color: var(--primary);
+}
+/* 统一开奖窗：骰面点阵与猜拳手势共用这一个中性凹陷窗，靠茶青描边统一 */
 .pk-stage {
-  height: 54px;
+  position: relative;
+  width: 62px;
+  height: 62px;
+  border-radius: 8px;
+  background: var(--bg-chat);
+  border: 1px solid var(--pk-edge);
   display: grid;
   place-items: center;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+/* 定格瞬间一闪的茶青高亮层，opacity 驱动，不触发布局 */
+.pk-stage::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1.5px var(--primary), 0 0 7px rgba(61, 139, 107, 0.45);
+  opacity: 0;
+  pointer-events: none;
 }
 .dice-face {
-  width: 46px;
-  height: 46px;
+  width: 100%;
+  height: 100%;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
-  padding: 7px;
-  border: 1.4px solid var(--text-2);
-  border-radius: 8px;
-  background: var(--bg-window);
+  padding: 11px;
 }
 .dice-cell {
   display: grid;
   place-items: center;
 }
 .dice-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--text-1);
 }
 .rps-hand {
-  width: 48px;
-  height: 48px;
+  width: 38px;
+  height: 38px;
   display: block;
 }
 .pk-result {
-  color: var(--text-1);
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.35;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
   text-align: center;
 }
-.pk-action {
-  flex: 0 0 auto;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--bg-window);
+/* 参与按钮融入气泡底部一体行：负 margin 撑满气泡内宽，底角由气泡 overflow 裁圆 */
+.pk-join {
+  width: calc(100% + 20px);
+  margin: 1px -10px -9px;
+  padding: 8px 10px;
+  border: none;
+  border-top: 1px solid var(--line);
+  background: transparent;
   color: var(--primary);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 140ms ease, border-color 140ms ease, transform 100ms ease;
+  transition: background 140ms ease;
 }
-.pk-action:hover:not(:disabled) {
-  background: rgba(61, 139, 107, 0.1);
-  border-color: rgba(61, 139, 107, 0.3);
+.pk-join:hover:not(:disabled) {
+  background: var(--primary-weak);
 }
-.pk-action:active:not(:disabled) {
-  transform: translateY(1px);
+.pk-join:active:not(:disabled) {
+  background: rgba(61, 139, 107, 0.16);
 }
-.pk-action:focus-visible {
+.pk-join:focus-visible {
   outline: 2px solid rgba(61, 139, 107, 0.35);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
-.pk-action:disabled {
+.pk-join:disabled {
   color: var(--text-3);
   cursor: default;
-  opacity: 0.55;
 }
-@keyframes pk-pop {
-  from {
-    transform: translateY(0) scale(1);
+@keyframes pk-roll {
+  0%,
+  100% {
+    transform: translateY(0);
   }
-  to {
-    transform: translateY(-1px) scale(1.03);
+  50% {
+    transform: translateY(-2px);
+  }
+}
+@keyframes pk-reveal {
+  0% {
+    transform: scale(1.12);
+  }
+  62% {
+    transform: scale(0.97);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes pk-flash {
+  0% {
+    opacity: 0;
+  }
+  28% {
+    opacity: 0.62;
+  }
+  100% {
+    opacity: 0;
   }
 }
 @media (prefers-reduced-motion: no-preference) {
   .pk-stage.rolling {
-    animation: pk-pop 160ms ease-in-out infinite alternate;
+    animation: pk-roll 360ms ease-in-out infinite;
+  }
+  .pk-stage.reveal {
+    animation: pk-reveal 480ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  .pk-stage.reveal::after {
+    animation: pk-flash 480ms ease-out;
   }
 }
 </style>
