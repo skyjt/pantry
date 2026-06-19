@@ -28,7 +28,7 @@ import PantryIcon from './components/PantryIcon.vue'
 import WindowControls from './components/WindowControls.vue'
 import WindowDragStrip from './components/WindowDragStrip.vue'
 
-// 设置独立小窗（ui-design §8）：P1 起按 8 组完整承载本地设置。
+// 设置独立小窗（ui-design §8）：按 7 组承载本地设置（决议 #150 重组，端口归网络、发送键归聊天、去掉杂物抽屉）。
 
 type Section =
   | 'profile'
@@ -37,18 +37,16 @@ type Section =
   | 'storage'
   | 'network'
   | 'shortcuts'
-  | 'advanced'
   | 'about'
 
 const sections: Array<{ id: Section; label: string; summary: string }> = [
-  { id: 'profile', label: '账号资料', summary: '这些信息会展示在局域网通讯录和聊天窗口。' },
-  { id: 'general', label: '通用外观', summary: '控制启动、窗口、主题和基础显示。' },
-  { id: 'notify', label: '消息通知', summary: '调整提醒方式、隐私预览和发送习惯。' },
-  { id: 'storage', label: '聊天与文件', summary: '管理文件保存位置、聊天记录导出和传输记录。' },
-  { id: 'network', label: '网络连接', summary: '用于跨网段发现、手动节点和局域网扫描。' },
-  { id: 'shortcuts', label: '快捷键', summary: '配置截图和主窗口唤起快捷键。' },
-  { id: 'advanced', label: '安全与高级', summary: '端口、网卡、诊断与维护能力集中在这里。' },
-  { id: 'about', label: '关于', summary: '查看版本、运行时和纯内网安全边界。' }
+  { id: 'profile', label: '账号资料', summary: '昵称、头像等会展示在通讯录和聊天窗口。' },
+  { id: 'general', label: '通用', summary: '启动方式、窗口行为与外观主题。' },
+  { id: 'notify', label: '通知', summary: '新消息的桌面提醒与提示音。' },
+  { id: 'storage', label: '聊天与文件', summary: '文件保存、发送键、聊天记录导出与传输记录。' },
+  { id: 'network', label: '网络', summary: '手动节点、网段扫描与端口。' },
+  { id: 'shortcuts', label: '快捷键', summary: '截图与主窗口的全局快捷键。' },
+  { id: 'about', label: '关于', summary: '版本、许可与纯内网安全说明。' }
 ]
 
 const section = ref<Section>('profile')
@@ -223,11 +221,6 @@ async function toggleMessagePreview(): Promise<void> {
   await saveApp({ showMessagePreview: !settings.value.showMessagePreview })
 }
 
-async function changeTheme(event: Event): Promise<void> {
-  const value = (event.target as HTMLSelectElement).value
-  if (value === 'light' || value === 'dark') await saveApp({ theme: value })
-}
-
 async function changeFontScale(event: Event): Promise<void> {
   const value = Number((event.target as HTMLSelectElement).value)
   if (value === 100 || value === 110 || value === 125) await saveApp({ fontScale: value })
@@ -238,11 +231,6 @@ async function changeSound(event: Event): Promise<void> {
   if (value === 'none' || value === 'drop' || value === 'wood' || value === 'ding') {
     await saveApp({ sound: value })
   }
-}
-
-async function changeSendKey(event: Event): Promise<void> {
-  const value = (event.target as HTMLSelectElement).value
-  if (value === 'enter' || value === 'ctrlEnter') await saveApp({ sendKey: value })
 }
 
 async function resetAppSettings(): Promise<void> {
@@ -645,18 +633,22 @@ async function removeRange(cidr: string): Promise<void> {
           <div class="panel">
             <div class="panel-head">
               <h2>外观</h2>
-              <p>主题和字体缩放会同步到主窗口。</p>
+              <p>主题和字体缩放会同步到主窗口，调整后立即生效。</p>
             </div>
-            <label class="setting-line">
+            <div class="setting-line">
               <div>
                 <strong>主题</strong>
                 <small>深色主题适合弱光环境。</small>
               </div>
-              <select :value="settings.theme" @change="changeTheme">
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
-            </label>
+              <div class="segmented" role="group" aria-label="主题">
+                <button type="button" :class="{ on: settings.theme === 'light' }" @click="saveApp({ theme: 'light' })">
+                  浅色
+                </button>
+                <button type="button" :class="{ on: settings.theme === 'dark' }" @click="saveApp({ theme: 'dark' })">
+                  深色
+                </button>
+              </div>
+            </div>
             <label class="setting-line">
               <div>
                 <strong>字体缩放</strong>
@@ -666,15 +658,6 @@ async function removeRange(cidr: string): Promise<void> {
                 <option :value="100">100%</option>
                 <option :value="110">110%</option>
                 <option :value="125">125%</option>
-              </select>
-            </label>
-            <label class="setting-line is-disabled">
-              <div>
-                <strong>语言</strong>
-                <small>多语言为后续版本能力。</small>
-              </div>
-              <select disabled>
-                <option>简体中文</option>
               </select>
             </label>
             <div class="panel-actions">
@@ -726,23 +709,6 @@ async function removeRange(cidr: string): Promise<void> {
               </select>
             </label>
           </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h2>输入习惯</h2>
-              <p>发送键会影响所有单聊和讨论组输入框。</p>
-            </div>
-            <label class="setting-line">
-              <div>
-                <strong>发送键</strong>
-                <small>另一组快捷键用于换行。</small>
-              </div>
-              <select :value="settings.sendKey" @change="changeSendKey">
-                <option value="enter">Enter 发送</option>
-                <option value="ctrlEnter">Ctrl/Cmd + Enter 发送</option>
-              </select>
-            </label>
-          </div>
         </section>
 
         <section v-else-if="section === 'storage'" class="page-section">
@@ -765,6 +731,27 @@ async function removeRange(cidr: string): Promise<void> {
                 >
                   <PantryIcon v-if="savedFlash.profile" name="check" :size="15" class="save-check" />
                   <span>{{ savedFlash.profile ? '保存成功！' : '保存' }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>发送</h2>
+              <p>发送键影响所有单聊和讨论组输入框，调整后立即生效。</p>
+            </div>
+            <div class="setting-line">
+              <div>
+                <strong>发送键</strong>
+                <small>另一组组合键用于换行。</small>
+              </div>
+              <div class="segmented" role="group" aria-label="发送键">
+                <button type="button" :class="{ on: settings.sendKey === 'enter' }" @click="saveApp({ sendKey: 'enter' })">
+                  Enter
+                </button>
+                <button type="button" :class="{ on: settings.sendKey === 'ctrlEnter' }" @click="saveApp({ sendKey: 'ctrlEnter' })">
+                  Ctrl/Cmd+Enter
                 </button>
               </div>
             </div>
@@ -871,6 +858,29 @@ async function removeRange(cidr: string): Promise<void> {
               </li>
             </ul>
           </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>端口</h2>
+              <p>全员端口需一致，修改后重启应用生效。</p>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span>UDP 端口</span>
+                <input v-model="udpPortInput" type="number" min="1" max="65535" />
+              </label>
+              <label class="field">
+                <span>TCP 端口</span>
+                <input v-model="tcpPortInput" type="number" min="1" max="65535" />
+              </label>
+            </div>
+            <div class="panel-actions">
+              <button class="primary save-btn" :class="{ 'is-saved': savedFlash.ports }" @click="savePorts">
+                <PantryIcon v-if="savedFlash.ports" name="check" :size="15" class="save-check" />
+                <span>{{ savedFlash.ports ? '保存成功！' : '保存端口' }}</span>
+              </button>
+            </div>
+          </div>
         </section>
 
         <section v-else-if="section === 'shortcuts'" class="page-section">
@@ -939,65 +949,6 @@ async function removeRange(cidr: string): Promise<void> {
                 <PantryIcon v-if="savedFlash.shortcuts" name="check" :size="15" class="save-check" />
                 <span>{{ savedFlash.shortcuts ? '保存成功！' : '保存快捷键' }}</span>
               </button>
-            </div>
-          </div>
-        </section>
-
-        <section v-else-if="section === 'advanced'" class="page-section">
-          <div class="panel">
-            <div class="panel-head">
-              <h2>端口</h2>
-              <p>全员端口需一致。修改后重启应用生效。</p>
-            </div>
-            <div class="port-grid">
-              <label class="field">
-                <span>UDP 端口</span>
-                <input v-model="udpPortInput" type="number" min="1" max="65535" />
-              </label>
-              <label class="field">
-                <span>TCP 端口</span>
-                <input v-model="tcpPortInput" type="number" min="1" max="65535" />
-              </label>
-            </div>
-            <div class="panel-actions">
-              <button
-                class="primary save-btn"
-                :class="{ 'is-saved': savedFlash.ports }"
-                @click="savePorts"
-              >
-                <PantryIcon v-if="savedFlash.ports" name="check" :size="15" class="save-check" />
-                <span>{{ savedFlash.ports ? '保存成功！' : '保存端口' }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <h2>维护</h2>
-              <p>诊断与清理能力会逐步补齐。</p>
-            </div>
-            <label class="setting-line is-disabled">
-              <div>
-                <strong>监听网卡</strong>
-                <small>当前监听全部 IPv4 网卡。</small>
-              </div>
-              <select disabled>
-                <option>全部 IPv4 网卡</option>
-              </select>
-            </label>
-            <div class="setting-line is-disabled">
-              <div>
-                <strong>诊断日志</strong>
-                <small>仅导出元数据日志，不包含消息正文。</small>
-              </div>
-              <button class="ghost" disabled>导出</button>
-            </div>
-            <div class="setting-line is-disabled">
-              <div>
-                <strong>清理离线联系人</strong>
-                <small>清理 90 天未上线联系人，后续版本开放。</small>
-              </div>
-              <button class="ghost" disabled>清理</button>
             </div>
           </div>
         </section>
@@ -1077,6 +1028,21 @@ async function removeRange(cidr: string): Promise<void> {
 
 <style scoped>
 .settings {
+  /* 设置页专属标尺（决议 #150）：间距 4px 基准台阶 / 圆角 Shape Lock（容器 8 · 控件 6 · 胶囊 999）/
+     字号 4 级阶梯，收敛全页魔数、统一节奏；仅设置页作用域，不影响聊天等其他界面 */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --r-card: 8px;
+  --r-control: 6px;
+  --r-pill: 999px;
+  --fs-title: 18px;
+  --fs-section: 15px;
+  --fs-body: 13px;
+  --fs-aux: 12px;
   display: flex;
   height: 100vh;
   min-width: 620px;
@@ -1098,10 +1064,10 @@ async function removeRange(cidr: string): Promise<void> {
 .account-card {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--sp-2);
   min-width: 0;
-  padding: 10px;
-  border-radius: 8px;
+  padding: var(--sp-3);
+  border-radius: var(--r-card);
   background: var(--bg-list);
 }
 
@@ -1131,13 +1097,13 @@ async function removeRange(cidr: string): Promise<void> {
 }
 
 .account-copy strong {
-  font-size: 13px;
+  font-size: var(--fs-body);
   line-height: 1.4;
 }
 
 .account-copy span {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--fs-aux);
 }
 
 .nav {
@@ -1149,12 +1115,12 @@ async function removeRange(cidr: string): Promise<void> {
 .nav button {
   height: 34px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: transparent;
   color: var(--text-2);
-  font-size: 13px;
+  font-size: var(--fs-body);
   text-align: left;
-  padding: 0 10px;
+  padding: 0 var(--sp-3);
   cursor: pointer;
 }
 
@@ -1182,15 +1148,15 @@ async function removeRange(cidr: string): Promise<void> {
   min-height: 58px;
   display: flex;
   justify-content: space-between;
-  gap: 14px;
-  padding-bottom: 14px;
-  margin-bottom: 14px;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-4);
+  margin-bottom: var(--sp-4);
   border-bottom: 1px solid var(--line);
 }
 
 .page-head h1 {
-  margin: 0 0 6px;
-  font-size: 18px;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-title);
   font-weight: 700;
   line-height: 1.25;
 }
@@ -1198,45 +1164,45 @@ async function removeRange(cidr: string): Promise<void> {
 .page-head p,
 .panel-head p {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--fs-aux);
   line-height: 1.5;
 }
 
 .notice {
   align-self: flex-start;
   max-width: 190px;
-  border-radius: 6px;
+  border-radius: var(--r-control);
   background: var(--primary-weak);
   color: var(--primary);
-  font-size: 12px;
+  font-size: var(--fs-aux);
   line-height: 1.4;
-  padding: 6px 8px;
+  padding: var(--sp-1) var(--sp-2);
 }
 
 .page-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 
 .panel,
 .empty-panel {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-card);
   background: var(--bg-window);
 }
 
 .panel {
-  padding: 14px;
+  padding: var(--sp-4);
 }
 
 .panel-head {
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
 }
 
 .panel-head h2 {
-  margin: 0 0 4px;
-  font-size: 14px;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-section);
   font-weight: 700;
   line-height: 1.35;
 }
@@ -1246,8 +1212,8 @@ async function removeRange(cidr: string): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 10px 0;
+  gap: var(--sp-4);
+  padding: var(--sp-3) 0;
   border-top: 1px solid var(--line);
 }
 
@@ -1299,10 +1265,41 @@ async function removeRange(cidr: string): Promise<void> {
   font-size: 12px;
 }
 
+/* 分段控件（决议 #150）：二选一偏好（主题 / 发送键）即时生效，比下拉直观，与头像样式分段同语言 */
+.segmented {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--bg-list);
+}
+.segmented button {
+  border: none;
+  background: transparent;
+  border-radius: calc(var(--r-control) - 2px);
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.segmented button:hover {
+  color: var(--text-1);
+}
+.segmented button.on {
+  background: var(--bg-window);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
 .field-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 12px;
+  gap: var(--sp-2) var(--sp-3);
 }
 
 .field-grid .field {
