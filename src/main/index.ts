@@ -230,6 +230,9 @@ if (!gotLock) {
     return png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength)
   }
 
+  // 文件默认保存目录：跨平台统一放「文档/teahouse」（决议 #159）。不用「下载/茶话间」——
+  // 中文目录名在部分系统/命令行/跨平台工具链下编码兼容差，且收到的文件属长期归档、放文档更合语义。
+  const defaultFileDir = (): string => join(app.getPath('documents'), 'teahouse')
   const imagesDir = (): string => join(app.getPath('userData'), 'data', 'images')
   const importedMediaDir = (): string => join(app.getPath('userData'), 'data', 'imported-media')
   const stickersDir = (): string => join(app.getPath('userData'), 'data', 'stickers')
@@ -792,7 +795,7 @@ if (!gotLock) {
         groupRepo: new GroupRepo(db),
         tcpPort,
         getSaveDir: () =>
-          appState?.config.fileDir || join(app.getPath('downloads'), '茶话间'),
+          appState?.config.fileDir || defaultFileDir(),
         getImagesDir: imagesDir
       })
       files.on('message', onMessage)
@@ -1221,7 +1224,7 @@ if (!gotLock) {
       avatar: c?.avatar ?? -1,
       setupDone: c?.setupDone ?? true,
       fileDir: c?.fileDir ?? '',
-      defaultFileDir: join(app.getPath('downloads'), '茶话间'),
+      defaultFileDir: defaultFileDir(),
       notifications: c?.notifications !== false,
       manualPeers: c?.manualPeers ?? [],
       scanRanges: c?.scanRanges ?? [],
