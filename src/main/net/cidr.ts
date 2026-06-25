@@ -70,3 +70,19 @@ export function buildCidrHostPlan(inputs: string[]): CidrHostPlan {
   }
   return { hosts, rangeCount: seenRanges.size }
 }
+
+/**
+ * 判断 IPv4 地址是否落在 CIDR 网段内（决议 #160：统计网段在线节点数用）。
+ * 非法 IP 或非法/超界 CIDR 一律返回 false。
+ */
+export function ipInCidr(ip: string, cidr: string): boolean {
+  const parsed = parseCidrBase(cidr)
+  if (!parsed) return false
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip.trim())
+  if (!m) return false
+  const octets = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
+  if (octets.some((o) => o > 255)) return false
+  const addr = ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0
+  const mask = (0xffffffff << (32 - parsed.prefix)) >>> 0
+  return ((addr & mask) >>> 0) === parsed.network
+}

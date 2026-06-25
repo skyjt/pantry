@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildCidrHostPlan, normalizeCidr, parseCidr, SCAN_MAX_HOSTS } from './cidr'
+import { buildCidrHostPlan, ipInCidr, normalizeCidr, parseCidr, SCAN_MAX_HOSTS } from './cidr'
 
 describe('parseCidr（网段扫描）', () => {
   it('/30 展开 2 个主机（去网络与广播地址）', () => {
@@ -46,5 +46,36 @@ describe('parseCidr（网段扫描）', () => {
     ])
     expect(plan.rangeCount).toBe(1)
     expect(plan.hosts).toEqual(['192.168.1.1', '192.168.1.2'])
+  })
+})
+
+describe('ipInCidr（网段归属判断，决议 #160）', () => {
+  it('IP 落在 /24 网段内（含边界）', () => {
+    expect(ipInCidr('10.1.2.5', '10.1.2.0/24')).toBe(true)
+    expect(ipInCidr('10.1.2.1', '10.1.2.0/24')).toBe(true)
+    expect(ipInCidr('10.1.2.254', '10.1.2.0/24')).toBe(true)
+  })
+
+  it('IP 不在网段内', () => {
+    expect(ipInCidr('10.1.3.5', '10.1.2.0/24')).toBe(false)
+    expect(ipInCidr('192.168.1.1', '10.1.2.0/24')).toBe(false)
+  })
+
+  it('CIDR 基址非网络地址也按掩码归一判断', () => {
+    // 192.168.1.77/30 的网络段为 192.168.1.76 ~ .79
+    expect(ipInCidr('192.168.1.78', '192.168.1.77/30')).toBe(true)
+    expect(ipInCidr('192.168.1.80', '192.168.1.77/30')).toBe(false)
+  })
+
+  it('/22 边界正确', () => {
+    expect(ipInCidr('172.16.3.255', '172.16.0.0/22')).toBe(true)
+    expect(ipInCidr('172.16.4.0', '172.16.0.0/22')).toBe(false)
+  })
+
+  it('非法 IP / 非法或超界 CIDR 一律 false', () => {
+    expect(ipInCidr('not-an-ip', '10.1.2.0/24')).toBe(false)
+    expect(ipInCidr('10.1.2.5', '10.0.0.0/8')).toBe(false) // 超 SCAN_MAX_HOSTS，parseCidrBase 拒绝
+    expect(ipInCidr('999.0.0.1', '10.1.2.0/24')).toBe(false)
+    expect(ipInCidr('10.1.2.5', 'not-a-cidr')).toBe(false)
   })
 })

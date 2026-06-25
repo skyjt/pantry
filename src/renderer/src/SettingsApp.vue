@@ -488,7 +488,10 @@ async function addRange(): Promise<void> {
 
 async function rescan(cidr: string): Promise<void> {
   const count = await window.pantry.scanRange(cidr)
-  scanTip.value = count >= 0 ? `已向 ${count} 个地址发出探测` : '网段不合法'
+  scanTip.value =
+    count >= 0 ? `已向 ${count} 个地址发出探测，新上线的同事稍后计入在线数` : '网段不合法'
+  // 探测/应答异步滞后，延迟重拉设置以更新在线数（决议 #160）
+  if (count >= 0) setTimeout(() => void reload(), 2500)
 }
 
 async function removeRange(cidr: string): Promise<void> {
@@ -857,17 +860,30 @@ async function removeRange(cidr: string): Promise<void> {
               <button class="primary" @click="addRange">扫描</button>
             </div>
             <div v-if="!hasScanRanges" class="empty-state">尚未保存扫描网段</div>
-            <ul v-else class="chips">
-              <li v-for="r in settings.scanRangeItems" :key="r.cidr">
-                <span>{{ r.cidr }} · {{ scanRangeSourceLabel(r) }}</span>
-                <button class="icon-button" title="再次扫描" @click="rescan(r.cidr)">
-                  <PantryIcon name="refresh" :size="13" />
-                </button>
-                <button class="icon-button" title="移除" @click="removeRange(r.cidr)">
-                  <PantryIcon name="x" :size="13" />
-                </button>
-              </li>
-            </ul>
+            <div v-else class="range-table">
+              <div class="range-row range-head">
+                <span>网段</span>
+                <span>在线</span>
+                <span>操作</span>
+              </div>
+              <div v-for="r in settings.scanRangeItems" :key="r.cidr" class="range-row">
+                <div class="range-cidr">
+                  <span class="cidr-text">{{ r.cidr }}</span>
+                  <small class="cidr-source">{{ scanRangeSourceLabel(r) }}</small>
+                </div>
+                <span class="range-count">
+                  <span class="count-badge" :class="{ zero: r.nodeCount === 0 }">{{ r.nodeCount }}</span>
+                </span>
+                <span class="range-ops">
+                  <button class="icon-button" title="刷新该网段（重新探测）" @click="rescan(r.cidr)">
+                    <PantryIcon name="refresh" :size="14" />
+                  </button>
+                  <button class="icon-button danger" title="删除该网段" @click="removeRange(r.cidr)">
+                    <PantryIcon name="x" :size="14" />
+                  </button>
+                </span>
+              </div>
+            </div>
           </div>
 
           <div class="panel">
@@ -1763,6 +1779,96 @@ async function removeRange(cidr: string): Promise<void> {
   border-radius: 8px;
   background: var(--bg-list);
   padding: 14px;
+}
+
+/* 网段扫描表格（决议 #160）：网段 / 在线节点数 / 操作 三列对齐，贴合设置页标尺 */
+.range-table {
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  overflow: hidden;
+}
+
+.range-row {
+  display: grid;
+  grid-template-columns: 1fr 56px 64px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.range-row + .range-row {
+  border-top: 1px solid var(--line);
+}
+
+.range-head {
+  background: var(--bg-list);
+  border-bottom: 1px solid var(--line);
+}
+
+.range-head > span {
+  font-size: var(--fs-aux);
+  color: var(--text-3);
+}
+
+.range-head > span:nth-child(2) {
+  text-align: center;
+}
+
+.range-cidr {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cidr-text {
+  font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cidr-source {
+  font-size: var(--fs-aux);
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.range-count {
+  display: flex;
+  justify-content: center;
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  background: var(--primary-weak);
+  color: var(--primary);
+  font-size: var(--fs-aux);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.count-badge.zero {
+  background: var(--bg-list);
+  color: var(--text-3);
+}
+
+.range-ops {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+.icon-button.danger:hover {
+  color: var(--danger);
 }
 
 .transfer-list {

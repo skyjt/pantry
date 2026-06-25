@@ -65,7 +65,7 @@ import {
   notificationIconPath
 } from './notifications'
 import { StickerRepo } from './store/sticker-repo'
-import { buildCidrHostPlan, normalizeCidr, parseCidr } from './net/cidr'
+import { buildCidrHostPlan, ipInCidr, normalizeCidr, parseCidr } from './net/cidr'
 import { TransferRepo } from './store/transfer-repo'
 import { GroupRepo } from './store/group-repo'
 import { FilesService } from './services/files'
@@ -514,6 +514,7 @@ if (!gotLock) {
     const c = appState?.config
     if (!c) return []
     const sources = c.scanRangeSources ?? {}
+    const onlinePeers = registry ? registry.list().filter((p) => p.online) : []
     return c.scanRanges.map((cidr) => {
       const source = sources[cidr] ?? { source: 'self' as const, addedAt: Date.now() }
       return {
@@ -522,7 +523,8 @@ if (!gotLock) {
         sourceNodeId: source.sourceNodeId,
         sourceName: source.sourceName,
         addedAt: source.addedAt,
-        lastAutoScanAt: source.lastAutoScanAt
+        lastAutoScanAt: source.lastAutoScanAt,
+        nodeCount: onlinePeers.filter((p) => ipInCidr(p.ip, cidr)).length
       }
     })
   }

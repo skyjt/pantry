@@ -418,6 +418,8 @@ export interface ScanRangeItemView {
   sourceName?: string
   addedAt: number
   lastAutoScanAt?: number
+  /** 该网段当前在线节点数（决议 #160）：online 且 IP ∈ CIDR 的节点计数 */
+  nodeCount: number
 }
 
 export interface AppSettingsPatch {
