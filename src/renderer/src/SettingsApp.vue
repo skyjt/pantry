@@ -66,6 +66,7 @@ const fileDir = ref('')
 const newPeer = ref('')
 const newCidr = ref('')
 const scanTip = ref('')
+const confirmingCidr = ref<string | null>(null)
 const transfers = ref<TransferView[]>([])
 const conversations = ref<ConversationView[]>([])
 const exportConvId = ref('')
@@ -500,6 +501,12 @@ async function removeRange(cidr: string): Promise<void> {
     scanRanges: settings.value.scanRanges.filter((r) => r !== cidr)
   })
 }
+
+// 删除二次确认（决议 #160）：点 ✕ 进确认态，点「删除」才真正移除
+async function confirmRemove(cidr: string): Promise<void> {
+  confirmingCidr.value = null
+  await removeRange(cidr)
+}
 </script>
 
 <template>
@@ -869,19 +876,24 @@ async function removeRange(cidr: string): Promise<void> {
               <div v-for="r in settings.scanRangeItems" :key="r.cidr" class="range-row">
                 <div class="range-cidr">
                   <span class="cidr-text">{{ r.cidr }}</span>
-                  <small class="cidr-source">{{ scanRangeSourceLabel(r) }}</small>
+                  <span class="cidr-source">（{{ scanRangeSourceLabel(r) }}）</span>
                 </div>
                 <span class="range-count">
                   <span class="count-badge" :class="{ zero: r.nodeCount === 0 }">{{ r.nodeCount }}</span>
                 </span>
                 <span class="range-ops">
-                  <button class="icon-button" title="刷新该网段（重新探测）" @click="rescan(r.cidr)">
+                  <button class="icon-button accent" title="刷新该网段（重新探测）" @click="rescan(r.cidr)">
                     <PantryIcon name="refresh" :size="14" />
                   </button>
-                  <button class="icon-button danger" title="删除该网段" @click="removeRange(r.cidr)">
+                  <button class="icon-button danger" title="删除该网段" @click="confirmingCidr = r.cidr">
                     <PantryIcon name="x" :size="14" />
                   </button>
                 </span>
+                <div v-if="confirmingCidr === r.cidr" class="range-confirm">
+                  <span class="confirm-q">删除该网段？</span>
+                  <button class="confirm-del" @click="confirmRemove(r.cidr)">删除</button>
+                  <button class="confirm-cancel" @click="confirmingCidr = null">取消</button>
+                </div>
               </div>
             </div>
           </div>
@@ -1789,6 +1801,7 @@ async function removeRange(cidr: string): Promise<void> {
 }
 
 .range-row {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 56px 64px;
   align-items: center;
@@ -1816,21 +1829,21 @@ async function removeRange(cidr: string): Promise<void> {
 
 .range-cidr {
   display: flex;
-  flex-direction: column;
-  gap: 1px;
+  align-items: baseline;
+  gap: 4px;
   min-width: 0;
 }
 
 .cidr-text {
+  flex-shrink: 0;
   font-family: var(--font-mono, ui-monospace, 'SF Mono', Menlo, monospace);
   font-size: var(--fs-body);
   color: var(--text-1);
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .cidr-source {
+  min-width: 0;
   font-size: var(--fs-aux);
   color: var(--text-3);
   overflow: hidden;
@@ -1867,8 +1880,61 @@ async function removeRange(cidr: string): Promise<void> {
   gap: var(--sp-1);
 }
 
-.icon-button.danger:hover {
+/* 操作按钮平时即带淡淡意图色（决议 #160）：刷新淡茶青、删除淡红，hover 加深 */
+.icon-button.accent {
+  color: var(--primary);
+  opacity: 0.55;
+}
+
+.icon-button.danger {
   color: var(--danger);
+  opacity: 0.55;
+}
+
+.icon-button.accent:hover,
+.icon-button.danger:hover {
+  opacity: 1;
+}
+
+/* 删除二次确认覆盖层（决议 #160）：盖住该行问「删除该网段？」 */
+.range-confirm {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3);
+  background: var(--bg-window);
+}
+
+.confirm-q {
+  margin-right: auto;
+  font-size: var(--fs-aux);
+  color: var(--text-1);
+}
+
+.confirm-del,
+.confirm-cancel {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: var(--fs-aux);
+  padding: 4px 10px;
+  border-radius: var(--r-control);
+}
+
+.confirm-del {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.confirm-cancel {
+  color: var(--text-2);
+}
+
+.confirm-del:hover,
+.confirm-cancel:hover {
+  background: var(--bg-list);
 }
 
 .transfer-list {
