@@ -447,4 +447,20 @@ describe('FilesService 发送状态以数据面为准（issue #3）', () => {
     expect(msgRepo.get(view!.id)?.status).toBe('failed')
     expect(transferRepo.get(tid)?.status).toBe('failed')
   })
+
+  it('offer 判负先标失败、数据随后送达 → served 以数据面为准救回已发送/完成（#164 测试盲区）', async () => {
+    // #164 三个用例都只测了「served / accept 先、判负后」；这里是逆序：判负抢先删 outgoing，
+    // 迟到的 served 仍须把误标的 failed 救回 done/sent（决议 #165 改动②的纵深防御行为）。
+    const { service, msgRepo, transferRepo, imgPath } = makeService(false)
+    const view = await service.offerPaths('node-bob', [imgPath], 'image')
+    await waitTick() // offer 判负回调先跑：finish('failed') 删 outgoing、消息标 failed
+    const tid = [...transferRepo.rows.keys()][0]
+    expect(transferRepo.get(tid)?.status).toBe('failed')
+    expect(msgRepo.get(view!.id)?.status).toBe('failed')
+
+    // 接收方其实已收图、TCP 拉走整图并回 finish 帧 → served 迟到送达
+    ;(service as unknown as { server: EventEmitter }).server.emit('served', tid)
+    expect(transferRepo.get(tid)?.status).toBe('done')
+    expect(msgRepo.get(view!.id)?.status).toBe('sent')
+  })
 })

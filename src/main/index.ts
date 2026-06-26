@@ -256,7 +256,10 @@ if (!gotLock) {
 
   function managedTransferMediaView(transferId: string): TransferView | null {
     const view = files?.transferView(transferId)
-    if (!view?.savedPath || view.status !== 'done') return null
+    if (!view?.savedPath) return null
+    // 接收方的图要下载完（done）才落盘存在；发送方的图自始在本地受管目录，
+    // 传输未完成（offering/accepted）也应能即时预览——否则发图瞬间取图被拒 → broken（issue #3，决议 #165）。
+    if (view.direction === 'in' && view.status !== 'done') return null
     const msg = msgRepoRef?.get(view.msgId)
     if (!msg || (msg.kind !== 'image' && msg.kind !== 'sticker')) return null
     if (!isPathInsideAny(view.savedPath, managedMediaRoots())) return null

@@ -104,13 +104,14 @@ const ready = computed(
   () => transfer.value?.status === 'done' || (props.msg.isMine && !!transfer.value?.savedPath)
 )
 const src = computed(() => `pantry-img://${transferId.value}`)
-const failed = computed(
-  () =>
-    broken.value ||
-    transfer.value?.status === 'failed' ||
-    transfer.value?.status === 'canceled' ||
-    transfer.value?.status === 'declined'
-)
+const failed = computed(() => {
+  if (broken.value) return true
+  // 发送方：以消息状态为准——数据送达即 sent、迟到的 offer 判负不算失败（issue #3，与终态保护一致）；
+  // 接收方：看传输结果（下载失败 / 被取消 / 被拒）。
+  if (props.msg.isMine) return props.msg.status === 'failed'
+  const s = transfer.value?.status
+  return s === 'failed' || s === 'canceled' || s === 'declined'
+})
 
 onMounted(() => {
   if (transferId.value) void transfers.ensure(transferId.value)

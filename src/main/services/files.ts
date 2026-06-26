@@ -134,11 +134,13 @@ export class FilesService extends EventEmitter {
       this.emitTransfer(transferId, false)
     })
     this.server.on('served', (transferId: string) => {
+      const row = this.deps.transferRepo.get(transferId)
+      if (!row || row.direction !== 'out') return
       const out = this.outgoing.get(transferId)
-      if (!out) return
-      this.deps.transferRepo.updateProgress(transferId, out.totalSize)
-      // 数据完整送达即「已发送」，不受 offer 回程 ACK 是否丢失影响（issue #3）
-      this.applyMsgStatus(out.msgId, 'sent')
+      this.deps.transferRepo.updateProgress(transferId, out?.totalSize ?? row.total)
+      // 数据完整送达是最权威的成功信号：即便 offer 回程 ACK 判负已抢先 finish('failed') 删了
+      // outgoing、把卡片误标 failed，这里也以数据面为准救回 done/sent（issue #3，决议 #165）。
+      this.applyMsgStatus(row.msg_id, 'sent')
       this.finish(transferId, 'done')
     })
 
