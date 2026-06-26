@@ -137,6 +137,8 @@ export class FilesService extends EventEmitter {
       const out = this.outgoing.get(transferId)
       if (!out) return
       this.deps.transferRepo.updateProgress(transferId, out.totalSize)
+      // 数据完整送达即「已发送」，不受 offer 回程 ACK 是否丢失影响（issue #3）
+      this.applyMsgStatus(out.msgId, 'sent')
       this.finish(transferId, 'done')
     })
 
@@ -218,10 +220,17 @@ export class FilesService extends EventEmitter {
     this.emitConvs()
     this.emitTransfer(transferId, true)
 
-    // offer 分包可靠发送；任一包失败 → 整体失败
+    // offer 分包可靠发送。注意：发送成败要以「数据面真实结果」为准，不能只看 offer 回程 ACK（issue #3）
     void this.sendOfferPackets(peerId, transferId, prepared).then((ok) => {
-      if (!ok) this.finish(transferId, 'failed')
-      this.applyMsgStatus(msgId, ok ? 'sent' : 'failed')
+      if (ok) {
+        this.applyMsgStatus(msgId, 'sent')
+        return
+      }
+      // offer 回程 ACK 丢失：若对方已接受或数据已送达，判已发送、不翻失败；否则才算真失败
+      const row = this.deps.transferRepo.get(transferId)
+      if (row && (row.status === 'accepted' || row.status === 'done')) return
+      this.finish(transferId, 'failed')
+      this.applyMsgStatus(msgId, 'failed')
     })
 
     const row = this.deps.msgRepo.get(msgId)
@@ -307,7 +316,13 @@ export class FilesService extends EventEmitter {
           groupId,
           groupRev: meta.rev
         }).then((ok) => {
-          if (!ok) this.finish(target.transferId, 'failed')
+          // offer 回程 ACK 丢失但对方已接受/数据已送达时不翻失败（issue #3）
+          if (!ok) {
+            const row = this.deps.transferRepo.get(target.transferId)
+            if (!row || (row.status !== 'accepted' && row.status !== 'done')) {
+              this.finish(target.transferId, 'failed')
+            }
+          }
           return ok
         })
       )
@@ -568,6 +583,8 @@ export class FilesService extends EventEmitter {
       if (out && row.status === 'offering') {
         out.accepted = true
         this.deps.transferRepo.updateStatus(ctl.transferId, 'accepted')
+        // 对方已接受即「已发送」，迟到的 offer-ACK 判负不再翻成失败（issue #3）
+        this.applyMsgStatus(out.msgId, 'sent')
         this.emitTransfer(ctl.transferId, true)
       }
     } else if (ctl.op === 'decline') {
@@ -759,6 +776,8 @@ export class FilesService extends EventEmitter {
     const row = this.deps.msgRepo.get(msgId)
     if (!row) return
     if (row.status === 'recalled' && status !== 'recalled') return
+    // issue #3：'sent'（accept / 数据送达已确认）是成功终态，迟到的 offer-ACK 'failed' 不再覆盖
+    if (row.status === 'sent' && status === 'failed') return
     this.deps.msgRepo.updateStatus(msgId, status)
     const event: MsgStatusEvent = { id: msgId, convId: row.conv_id, status }
     this.emit('status', event)

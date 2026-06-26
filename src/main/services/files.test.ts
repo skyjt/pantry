@@ -357,3 +357,94 @@ describe('FilesService 群聊媒体', () => {
     expect([...transferRepo.rows.values()][0].status).toBe('offering')
   })
 })
+
+describe('FilesService 发送状态以数据面为准（issue #3）', () => {
+  // 让 offer 控制报文的回程 ACK 结果可控（模拟 UDP 丢包后判负）；accept 等其它报文照常成功。
+  function makeService(offerAck: boolean | Promise<boolean>) {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-files-issue3-'))
+    tmpDirs.push(dir)
+    const imgPath = join(dir, 'shot.png')
+    writeFileSync(imgPath, 'small image bytes')
+
+    const messenger = new FakeMessenger()
+    const baseSend = messenger.sendReliable.bind(messenger)
+    messenger.sendReliable = async (peerId: string, env: Envelope<FileCtlPayload>) => {
+      await baseSend(peerId, env)
+      return env.payload.op === 'offer' ? offerAck : true
+    }
+
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      groupRepo: undefined,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+    return { service, messenger, msgRepo, transferRepo, imgPath }
+  }
+
+  it('offer 回程 ACK 丢失、但数据已送达 → 判已发送，不被迟到的失败覆盖', async () => {
+    let failOffer!: (v: boolean) => void
+    const { service, msgRepo, transferRepo, imgPath } = makeService(
+      new Promise<boolean>((resolve) => {
+        failOffer = resolve
+      })
+    )
+    const view = await service.offerPaths('node-bob', [imgPath], 'image')
+    expect(view).not.toBeNull()
+    const tid = [...transferRepo.rows.keys()][0]
+
+    // 数据先于 offer 判负通过 TCP 拉走完成
+    ;(service as unknown as { server: EventEmitter }).server.emit('served', tid)
+    expect(msgRepo.get(view!.id)?.status).toBe('sent')
+    expect(transferRepo.get(tid)?.status).toBe('done')
+
+    // offer 回程 ACK 这才超时判负（迟到），不得翻回失败
+    failOffer(false)
+    await waitTick()
+    expect(msgRepo.get(view!.id)?.status).toBe('sent')
+    expect(transferRepo.get(tid)?.status).toBe('done')
+  })
+
+  it('offer 回程 ACK 丢失、但对方已接受 → 判已发送', async () => {
+    let failOffer!: (v: boolean) => void
+    const { service, messenger, msgRepo, transferRepo, imgPath } = makeService(
+      new Promise<boolean>((resolve) => {
+        failOffer = resolve
+      })
+    )
+    const view = await service.offerPaths('node-bob', [imgPath], 'image')
+    const tid = [...transferRepo.rows.keys()][0]
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'accept',
+        transferId: tid
+      })
+    )
+    expect(msgRepo.get(view!.id)?.status).toBe('sent')
+    expect(transferRepo.get(tid)?.status).toBe('accepted')
+
+    failOffer(false)
+    await waitTick()
+    expect(msgRepo.get(view!.id)?.status).toBe('sent')
+  })
+
+  it('offer 失败且无任何送达迹象 → 仍判失败', async () => {
+    const { service, msgRepo, transferRepo, imgPath } = makeService(false)
+    const view = await service.offerPaths('node-bob', [imgPath], 'image')
+    await waitTick()
+    const tid = [...transferRepo.rows.keys()][0]
+    expect(msgRepo.get(view!.id)?.status).toBe('failed')
+    expect(transferRepo.get(tid)?.status).toBe('failed')
+  })
+})
