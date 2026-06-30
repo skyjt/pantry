@@ -9,8 +9,20 @@ import PantryIcon from './PantryIcon.vue'
 // 图片/表情消息气泡（ui-design §5）：图片 ≤280px 可看大图；表情固定 120px。
 // 右键「添加到表情」（F-MSG-7）。图源走 pantry-img:// 自定义协议。
 
-const emit = defineEmits<{ forward: [] }>()
-const props = defineProps<{ msg: MessageView }>()
+const emit = defineEmits<{ forward: []; recall: [] }>()
+const props = withDefaults(
+  defineProps<{
+    msg: MessageView
+    recallVisible?: boolean
+    recallDisabled?: boolean
+    recallLabel?: string
+  }>(),
+  {
+    recallVisible: false,
+    recallDisabled: false,
+    recallLabel: '撤回'
+  }
+)
 const transfers = useTransfersStore()
 const stickersStore = useStickersStore()
 const broken = ref(false)
@@ -18,16 +30,20 @@ const menuAt = ref<{ x: number; y: number } | null>(null)
 const addTip = ref('')
 const addTipKind = ref<'ok' | 'fail'>('ok')
 const MENU_WIDTH = 112
-const MENU_HEIGHT = 100
+const MENU_ITEM_HEIGHT = 32
+const MENU_PADDING = 10
 const MENU_MARGIN = 8
 let addTipTimer: number | undefined
 
 const isSticker = computed(() => props.msg.kind === 'sticker')
+const menuHeight = computed(
+  () => MENU_PADDING + MENU_ITEM_HEIGHT * (props.recallVisible ? 4 : 3)
+)
 
 function onContextMenu(event: MouseEvent): void {
   event.stopPropagation()
   const maxX = Math.max(MENU_MARGIN, window.innerWidth - MENU_WIDTH - MENU_MARGIN)
-  const maxY = Math.max(MENU_MARGIN, window.innerHeight - MENU_HEIGHT - MENU_MARGIN)
+  const maxY = Math.max(MENU_MARGIN, window.innerHeight - menuHeight.value - MENU_MARGIN)
   menuAt.value = {
     x: Math.max(MENU_MARGIN, Math.min(event.clientX, maxX)),
     y: Math.max(MENU_MARGIN, Math.min(event.clientY, maxY))
@@ -84,6 +100,11 @@ function showTip(text: string, kind: 'ok' | 'fail'): void {
 function forwardImage(): void {
   menuAt.value = null
   emit('forward')
+}
+
+function recallImage(): void {
+  menuAt.value = null
+  emit('recall')
 }
 
 function openImageViewer(): void {
@@ -145,6 +166,15 @@ onUnmounted(clearAddTipTimer)
       <button type="button" @click="copyImage">复制</button>
       <button type="button" @click="forwardImage">转发</button>
       <button type="button" @click="addToStickers">添加到表情</button>
+      <button
+        v-if="props.recallVisible"
+        type="button"
+        class="danger"
+        :disabled="props.recallDisabled"
+        @click="recallImage"
+      >
+        {{ props.recallLabel }}
+      </button>
     </div>
     <span
       v-if="addTip"
@@ -207,6 +237,16 @@ onUnmounted(clearAddTipTimer)
 }
 .ctx button:hover {
   background: var(--line);
+}
+.ctx button.danger {
+  color: var(--danger);
+}
+.ctx button:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+.ctx button:disabled:hover {
+  background: transparent;
 }
 .tip {
   position: absolute;

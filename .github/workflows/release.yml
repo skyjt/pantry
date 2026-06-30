@@ -311,14 +311,25 @@ jobs:
 
       - name: 生成发布说明
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
           CURRENT_TAG="${GITHUB_REF_NAME}"
           VERSION="${CURRENT_TAG#v}"
 
-          # 找上一个 tag（按创建时间倒序排，跳过当前 tag）
-          PREV_TAG=$(git tag -l --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          # 优先以上一个 GitHub Release 为范围起点；若查询失败，再退回本地 tag。
+          PREV_TAG=$(
+            gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName \
+              --jq '.[].tagName' 2>/dev/null \
+              | grep -v "^${CURRENT_TAG}$" \
+              | head -1 \
+              || true
+          )
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag -l --sort=-creatordate | grep -v "^${CURRENT_TAG}$" | head -1 || true)
+          fi
 
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..${CURRENT_TAG}"
@@ -338,9 +349,16 @@ jobs:
           FEATURES=$(extract "feat")
           FIXES=$(extract "fix")
           OTHERS=$(extract "docs|chore|refactor|test|perf")
+          COMMITS=$(git log "${RANGE}" --reverse --pretty=format:'- `%h` %s' 2>/dev/null || true)
 
           {
             echo "## 更新内容"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "本次发布说明覆盖 \`${PREV_TAG}\` 到 \`${CURRENT_TAG}\` 的所有提交。"
+            else
+              echo "本次发布说明覆盖 \`${CURRENT_TAG}\` 可追溯的所有提交。"
+            fi
             echo ""
             if [ -n "$FEATURES" ]; then
               echo "### ✨ 新功能"
@@ -357,6 +375,16 @@ jobs:
               echo "$OTHERS"
               echo ""
             fi
+            echo "## 提交明细"
+            echo ""
+            echo "范围：\`${RANGE}\`"
+            echo ""
+            if [ -n "$COMMITS" ]; then
+              echo "$COMMITS"
+            else
+              echo "- 无提交记录"
+            fi
+            echo ""
             echo "---"
             echo ""
             echo "## 可用安装包"

@@ -349,9 +349,7 @@ export const useChatStore = defineStore('chat', {
         conv.type === 'group'
           ? await window.pantry.sendGroupText(conv.peerId, text, mentions)
           : await window.pantry.sendText(conv.peerId, text)
-      if (!view) return false
-      this.appendConversationMessage(conv.id, view)
-      return true
+      return this.pushOwn(view)
     },
 
     async resend(msgId: string): Promise<void> {
@@ -426,6 +424,10 @@ export const useChatStore = defineStore('chat', {
     pushOwn(view: MessageView | null): boolean {
       if (!view) return false
       if (this.messages[view.convId]) this.appendConversationMessage(view.convId, view)
+      if (view.convId === this.activeConvId) {
+        this.viewingHistory = false
+        this.requestConversationScroll('latest')
+      }
       return true
     }
   }

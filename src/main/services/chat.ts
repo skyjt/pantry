@@ -48,6 +48,12 @@ export interface ChatDeps {
   peerClock?: PeerClock
   /** 在线即时能力（PK）：发送前确认对端仍在线 */
   isOnline?: (peerId: string) => boolean
+  /** 媒体撤回由文件服务判断 transfer 状态并取消未完成传输。 */
+  mediaRecall?: {
+    canRecall: (row: MsgRow) => boolean
+    applyLocalRecall: (row: MsgRow) => void
+    applyIncomingRecall: (row: MsgRow) => boolean
+  }
 }
 
 const toConvView = convRowToView
@@ -406,12 +412,17 @@ export class ChatService extends EventEmitter {
     const expectedConv = payload.groupId ? `group:${payload.groupId}` : `single:${env.from}`
     if (target.conv_id !== expectedConv) return
     if (target.status === 'recalled') return
-    this.applyRecall(target, env.id, '对方撤回了一条消息', env.ts, true)
+    if (isMediaRecallKind(target.kind) && !this.deps.mediaRecall?.applyIncomingRecall(target)) {
+      return
+    }
+    this.applyRecall(target, env.id, '对方撤回了一条消息', env.ts, true, false)
   }
 
   private canRecall(row: MsgRow): boolean {
     if (row.is_mine === 0) return false
-    if ((row.kind !== 'text' && row.kind !== 'pk') || row.status === 'recalled') return false
+    if (row.status === 'recalled') return false
+    if (isMediaRecallKind(row.kind) && !this.deps.mediaRecall?.canRecall(row)) return false
+    if (row.kind !== 'text' && row.kind !== 'pk' && !isMediaRecallKind(row.kind)) return false
     return Date.now() - row.ts <= RECALL_WINDOW_MS
   }
 
@@ -431,8 +442,10 @@ export class ChatService extends EventEmitter {
     tipId: string,
     tip: string,
     ts: number,
-    countUnread: boolean
+    countUnread: boolean,
+    applyMediaRecall = true
   ): void {
+    if (applyMediaRecall && isMediaRecallKind(target.kind)) this.deps.mediaRecall?.applyLocalRecall(target)
     this.deps.msgRepo.recall(target.id)
     this.emit('status', { id: target.id, convId: target.conv_id, status: 'recalled' } satisfies MsgStatusEvent)
 
@@ -529,6 +542,10 @@ function makePkRef(game: PkGame): PkRefView {
     game,
     result: game === 'dice' ? randomInt(1, 7) : randomRps()
   }
+}
+
+function isMediaRecallKind(kind: string): boolean {
+  return kind === 'image' || kind === 'file'
 }
 
 function randomRps(): PkResult {

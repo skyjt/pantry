@@ -119,7 +119,9 @@ export const CAPS = {
   /** 可作为本平台更新源：运行于可分发形态（nsis 自留安装器 / deb 自重打包），能向同平台同架构低版本节点提供安装包。 */
   updateSource: 'upd1',
   /** 私聊文件支持发送方在文件卡片上请求免确认直接接收（收端仍受本地开关控制）。 */
-  fileDirect: 'fd1'
+  fileDirect: 'fd1',
+  /** 支持 file-ctl offer.msgId，并可撤回图片 / 未完成文件。 */
+  mediaRecall: 'mrec1'
 } as const
 
 /** 报文信封（protocol §4） */
@@ -270,6 +272,8 @@ export const GROUP_IMG_AUTO_ACCEPT = 10 * 1024 * 1024
 export interface FileCtlOffer {
   op: 'offer'
   transferId: string
+  /** 聊天媒体消息 ID；图片 / 普通文件 / 群文件新端填写，用于跨端撤回锚点。 */
+  msgId?: string
   /** 分包序号/总数（1-based） */
   seq: number
   total: number

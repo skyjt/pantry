@@ -30,7 +30,7 @@ import {
 } from '../net/transfer'
 import { sanitizeRelPath } from '../util/sanitize'
 import { convRowToView, type ConvRepo } from '../store/conv-repo'
-import { MsgRepo, msgRowToView } from '../store/msg-repo'
+import { MsgRepo, msgRowToView, type MsgRow } from '../store/msg-repo'
 import type { TransferRepo } from '../store/transfer-repo'
 import type { GroupRepo } from '../store/group-repo'
 
@@ -50,6 +50,7 @@ interface OutgoingState {
 
 interface AssemblingOffer {
   peerId: string
+  msgId?: string
   parts: Map<number, FileMeta[]>
   total: number
   totalSize: number
@@ -234,7 +235,7 @@ export class FilesService extends EventEmitter {
     this.emitTransfer(transferId, true)
 
     // offer 分包可靠发送。注意：发送成败要以「数据面真实结果」为准，不能只看 offer 回程 ACK（issue #3）
-    void this.sendOfferPackets(peerId, transferId, prepared).then((ok) => {
+    void this.sendOfferPackets(peerId, transferId, prepared, undefined, msgId).then((ok) => {
       if (ok) {
         this.applyMsgStatus(msgId, 'sent')
         return
@@ -325,10 +326,16 @@ export class FilesService extends EventEmitter {
 
     void Promise.all(
       transfers.map((target) =>
-        this.sendOfferPackets(target.peerId, target.transferId, prepared, {
-          groupId,
-          groupRev: meta.rev
-        }).then((ok) => {
+        this.sendOfferPackets(
+          target.peerId,
+          target.transferId,
+          prepared,
+          {
+            groupId,
+            groupRev: meta.rev
+          },
+          msgId
+        ).then((ok) => {
           // offer 回程 ACK 丢失但对方已接受/数据已送达时不翻失败（issue #3）
           if (!ok) {
             const row = this.deps.transferRepo.get(target.transferId)
@@ -483,7 +490,8 @@ export class FilesService extends EventEmitter {
     peerId: string,
     transferId: string,
     prepared: PreparedOutgoing,
-    group?: GroupOfferContext
+    group?: GroupOfferContext,
+    msgId?: string
   ): Promise<boolean> {
     const totalPackets = Math.ceil(prepared.metas.length / OFFER_FILES_PER_PACKET)
     for (let i = 0; i < totalPackets; i++) {
@@ -500,6 +508,7 @@ export class FilesService extends EventEmitter {
         totalSize: prepared.totalSize,
         fileCount: prepared.fileCount,
         rootName: prepared.rootName,
+        ...(msgId ? { msgId } : {}),
         ...(prepared.purpose ? { purpose: prepared.purpose } : {}),
         ...(group ? { groupId: group.groupId, groupRev: group.groupRev } : {})
       }
@@ -669,6 +678,39 @@ export class FilesService extends EventEmitter {
       .filter((view): view is TransferView => view !== null)
   }
 
+  canRecallMessage(msgId: string): boolean {
+    const msg = this.deps.msgRepo.get(msgId)
+    if (!msg || msg.status === 'recalled') return false
+    const transferIds = mediaTransferIds(msg)
+    if (transferIds.length === 0) return false
+    const transferRows = transferIds.map((id) => this.deps.transferRepo.get(id))
+    if (transferRows.some((row) => !row || !this.peerSupportsMediaRecall(row.peer_id))) return false
+    if (msg.kind === 'image') return true
+    if (msg.kind !== 'file') return false
+    return transferIds.every((id) => this.deps.transferRepo.get(id)?.status !== 'done')
+  }
+
+  /** 撤回媒体消息时取消尚未完成的传输；已完成文件返回 false，避免删除/隐藏。 */
+  applyRecallMessage(msgId: string): boolean {
+    const msg = this.deps.msgRepo.get(msgId)
+    if (!msg || msg.status === 'recalled') return false
+    const transferIds = mediaTransferIds(msg)
+    if (msg.kind === 'file' && !this.canRecallMessage(msgId)) return false
+    if (msg.kind !== 'file' && msg.kind !== 'image') return false
+
+    for (const transferId of transferIds) {
+      const row = this.deps.transferRepo.get(transferId)
+      if (!row || row.status === 'done') continue
+      const inc = this.incoming.get(transferId)
+      if (inc) {
+        inc.cancelRef.canceled = true
+        inc.cancelRef.socket?.destroy()
+      }
+      this.finish(transferId, 'canceled')
+    }
+    return true
+  }
+
   // ---------- 控制面入站 ----------
 
   private onCtl(env: Envelope): void {
@@ -719,6 +761,7 @@ export class FilesService extends EventEmitter {
     if (!asm) {
       asm = {
         peerId,
+        ...(offer.msgId ? { msgId: offer.msgId } : {}),
         parts: new Map(),
         total: offer.total,
         totalSize: offer.totalSize,
@@ -732,6 +775,7 @@ export class FilesService extends EventEmitter {
       this.assembling.set(offer.transferId, asm)
     }
     if (asm.peerId !== peerId) return
+    if (asm.msgId !== offer.msgId) return
     if (asm.groupId !== offer.groupId || asm.groupRev !== offer.groupRev) return
     asm.parts.set(offer.seq, offer.files)
     if (asm.parts.size < asm.total) return
@@ -780,7 +824,7 @@ export class FilesService extends EventEmitter {
     const convId = asm.groupId
       ? this.deps.convRepo.ensureGroup(asm.groupId)
       : this.deps.convRepo.ensureSingle(peerId)
-    const msgId = randomUUID()
+    const msgId = asm.msgId ?? randomUUID()
     const fileRef: FileRefView = {
       transferId: offer.transferId,
       name: asm.rootName,
@@ -937,6 +981,11 @@ export class FilesService extends EventEmitter {
     return sanitizeDirName(this.deps.peerDisplayName?.(peerId) || peerId)
   }
 
+  private peerSupportsMediaRecall(peerId: string): boolean {
+    const caps = this.deps.registry.get(peerId)?.profile.caps
+    return Array.isArray(caps) && caps.includes(CAPS.mediaRecall)
+  }
+
   private defaultReceiveDir(peerId: string): string {
     return join(this.deps.getSaveDir(), this.peerDirName(peerId))
   }
@@ -968,6 +1017,20 @@ export class FilesService extends EventEmitter {
 
 function messageKindForPurpose(purpose: FileCtlOffer['purpose']): 'file' | 'image' | 'sticker' {
   return purpose === 'image' || purpose === 'sticker' ? purpose : 'file'
+}
+
+function mediaTransferIds(row: MsgRow): string[] {
+  if (row.kind !== 'file' && row.kind !== 'image') return []
+  if (!row.file_ref) return []
+  try {
+    const ref = JSON.parse(row.file_ref) as FileRefView
+    const ids = Array.isArray(ref.transferIds) && ref.transferIds.length > 0
+      ? ref.transferIds
+      : [ref.transferId]
+    return ids.filter((id): id is string => typeof id === 'string' && id.length > 0)
+  } catch {
+    return []
+  }
 }
 
 // eslint-disable-next-line no-control-regex

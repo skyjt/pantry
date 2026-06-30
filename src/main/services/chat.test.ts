@@ -160,6 +160,97 @@ describe('ChatService 撤回', () => {
       status: 'sent'
     })
   })
+
+  it('自己的未完成文件消息可通过媒体撤回适配器撤回', () => {
+    const msgRepo = new FakeMsgRepo()
+    msgRepo.rows.set(
+      'msg-file',
+      makeRow({
+        id: 'msg-file',
+        kind: 'file',
+        content: '[文件] 资料.txt',
+        file_ref: JSON.stringify({
+          transferId: 't-file',
+          name: '资料.txt',
+          size: 5,
+          count: 1,
+          dir: false
+        }),
+        status: 'sent'
+      })
+    )
+    const messenger = new FakeMessenger()
+    const recalled: string[] = []
+    const chat = new ChatService({
+      selfId: 'node-self',
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger,
+      mediaRecall: {
+        canRecall: (row: MsgRow) => row.id === 'msg-file',
+        applyLocalRecall: (row: MsgRow) => recalled.push(row.id),
+        applyIncomingRecall: () => true
+      }
+    } as never)
+
+    expect(chat.recall('msg-file')).toBe(true)
+
+    expect(recalled).toEqual(['msg-file'])
+    expect(messenger.sent).toHaveLength(1)
+    expect(messenger.sent[0].env.payload).toMatchObject({
+      kind: 'recall',
+      targetId: 'msg-file'
+    })
+    expect(msgRepo.get('msg-file')?.status).toBe('recalled')
+  })
+
+  it('收到已完成文件的迟到撤回时不隐藏本地消息', () => {
+    const msgRepo = new FakeMsgRepo()
+    msgRepo.rows.set(
+      'msg-file-done',
+      makeRow({
+        id: 'msg-file-done',
+        conv_id: 'single:node-bob',
+        sender_id: 'node-bob',
+        is_mine: 0,
+        kind: 'file',
+        content: '[文件] 资料.txt',
+        file_ref: JSON.stringify({
+          transferId: 't-file-done',
+          name: '资料.txt',
+          size: 5,
+          count: 1,
+          dir: false
+        }),
+        status: 'sent'
+      })
+    )
+    const messenger = new FakeMessenger()
+    new ChatService({
+      selfId: 'node-self',
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      groupRepo: new FakeGroupRepo() as unknown as GroupRepo,
+      messenger: messenger as unknown as Messenger,
+      mediaRecall: {
+        canRecall: () => false,
+        applyLocalRecall: () => undefined,
+        applyIncomingRecall: () => false
+      }
+    } as never)
+
+    messenger.emit('incoming', {
+      v: 1,
+      type: 'msg',
+      id: 'recall-file-done',
+      from: 'node-bob',
+      ts: Date.now(),
+      payload: { kind: 'recall', targetId: 'msg-file-done' }
+    } satisfies Envelope<MsgPayload>)
+
+    expect(msgRepo.get('msg-file-done')?.status).toBe('sent')
+  })
 })
 
 describe('ChatService 私聊窗口震动', () => {

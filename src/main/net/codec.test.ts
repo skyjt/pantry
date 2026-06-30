@@ -302,6 +302,39 @@ describe('codec', () => {
     })
   })
 
+  it('file-ctl 媒体 offer 接受受控 msgId，并拒绝非法 msgId', () => {
+    const withMsgId = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-media-1',
+      msgId: 'msg-media-1',
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'a.png', size: 10 }],
+      totalSize: 10,
+      fileCount: 1,
+      rootName: 'a.png',
+      purpose: 'image'
+    } as FileCtlPayload)
+    expect(decode(encode(withMsgId))).toMatchObject({ ok: true, known: true })
+
+    const badMsgId = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
+      op: 'offer',
+      transferId: 'transfer-media-2',
+      msgId: 'x'.repeat(65),
+      seq: 1,
+      total: 1,
+      files: [{ fileId: 'file-1', path: 'a.png', size: 10 }],
+      totalSize: 10,
+      fileCount: 1,
+      rootName: 'a.png',
+      purpose: 'image'
+    } as FileCtlPayload)
+    expect(decode(encode(badMsgId))).toEqual({
+      ok: false,
+      reason: 'bad-payload:file-ctl'
+    })
+  })
+
   it('file-ctl 更新包 offer 允许 purpose=update 且不套用群聊图片上限', () => {
     const updateOffer = makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-aaaa', {
       op: 'offer',

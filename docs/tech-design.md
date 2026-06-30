@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| 状态 | v0.97，P1 本地交付候选；Linux arm64 发布撤掉老版系统 mksquashfs |
-| 日期 | 2026-06-28 |
+| 状态 | v0.98，P1 本地交付候选；媒体撤回已实现（决议 #188） |
+| 日期 | 2026-06-30 |
 | 关系 | 上游：[requirements.md](requirements.md)（功能）、[protocol.md](protocol.md)（协议）、[ui-design.md](ui-design.md)（界面）；硬约束：根 README「开发红线」（Electron 22.3.27 / Chrome 108 / Node 16.17 焊死） |
 
 ## 1. 选型决策总表
@@ -107,7 +107,7 @@ src/
 |---|---|
 | `peers:list` / `peers:probe` / `peers:addManual` / `peers:scan` / `peers:scan-all-ranges` / `peers:set-remark` | 通讯录、探活（F-DISC-8）、手动 IP、单网段扫描、全部已保存网段扫描、本地备注；同步来的网段来源随 `SettingsView.scanRangeItems` 展示 |
 | `conv:list` / `conv:pin` / `conv:mute` / `conv:markRead` / `conv:remove` | 会话列表操作 |
-| `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` / `msg:nudge` / `msg:pk` / `msg:search` | 消息分页（倒序游标）、发送、重发、撤回、私聊窗口震动、PK 分歧解决、当前会话历史搜索 |
+| `msg:page(convId, beforeTs, n)` / `msg:send` / `msg:resend` / `msg:recall` / `msg:nudge` / `msg:pk` / `msg:search` | 消息分页（倒序游标）、发送、重发、撤回（文本 / PK / 图片 / 未完成文件统一入口）、私聊窗口震动、PK 分歧解决、当前会话历史搜索 |
 | `file:grant-paths` / `file:offer` / `file:direct` / `group-file:offer` / `file:accept` / `file:cancel` / `file:reveal` | 文件传输四件套；`file:grant-paths` 只为拖拽 / 粘贴产生的本地路径登记一次性授权，`file:offer` / `group-file:offer` 仍必须消耗授权；`file:direct` 由发送方文件卡片触发，在已有私聊普通文件 transfer 上发送 `file-ctl {op:"direct"}`；群聊发送为多条点对点 transfer 的发送侧编排且不支持直接发送 |
 | `group:create` / `group:update` | 讨论组 |
 | `search:query(q, scope)` | 全局搜索（联系人/组/记录/文件 四分类一次返回） |
@@ -147,6 +147,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - `groups.creator_ip/creator_id/admin_secret_hash/admin_hint` 为讨论组管理门槛（决议 #27/#30/#113）：密码明文不入库；提示仅用于成员输入密码时展示，不参与鉴权；无密码组优先以创建者 nodeId 接受管理变更，并保留创建 IP 作为旧版本兼容。v9 迁移把旧无密码群的 `updated_by` 回填为 `creator_id`，避免多网卡/虚拟机网络下创建 IP 与实际源 IP 不一致导致合法改名 `group.info` 被误拒。该机制服务于内网协作秩序，不替代加密/签名。
 - 群名变更提示（决议 #87）不新增协议字段、不新增迁移：`GroupsService` 在本机改名与远端 `group.info` 应用时，根据旧/新群名写入 `messages.kind='system'`，消息 ID 使用 `group:<groupId>:rename:<rev>` 保证重复 `info` 幂等；发送人显示名由主进程注入解析函数，优先本地备注，其次 registry 昵称。
 - PK 消息（决议 #139）不新增 SQLite 表或列：`messages.kind='pk'`，`content` 写入不透结果的安全摘要（如「[PK] 骰子」「[PK] 猜拳」），用于会话预览、搜索、FTS 与通知；`file_ref` 复用为 `PkRef` JSON（`{game,result}`），用于气泡最终结果、导出 HTML/TXT 与失败重试复用同一结果，由 `kind` 区分其 JSON 形状。
+- 媒体撤回（决议 #188）不新增 SQLite 表或列：图片 / 文件仍分别写 `messages.kind='image'|'file'`，`file_ref` 保留 transfer 引用；变化是发送端先生成 `msgId` 并写入 `file-ctl offer.msgId`，接收端用同一 `msgId` 入库。`messages.status='recalled'` 和既有 FTS 清理逻辑继续表达撤回；文件是否可撤回由关联 `transfers.status` 与 `file_ref.transferIds[]` 计算，不把“已接收完成”另存成新列。
 - 中文搜索：FTS5 不会切中文词 → **入库时把 `text` 按字拆开以空格连接**写入 fts 表，查询同样按字拆 + `"…"` 短语匹配；文件名/联系人走 `LIKE %…%`（千级数据量足够）。会话内历史搜索固定带 `conv_id` 范围，直接在 `messages` 上按 `kind/content/file_ref/ts` 白名单条件查询：关键词匹配 `content` 与 `file_ref` 展示名，图片/文件/日期筛选只影响本地 SQLite 查询，不产生协议报文或数据库迁移；空关键词允许返回当前会话最近记录，仍受类型、日期与 limit 约束；图片/文件命中返回解析后的 `FileRefView`，渲染层仅用 `transferId` 走既有 `pantry-img://` 安全协议显示缩略图，不暴露本地保存路径。
 - 定时清理（启动 + 每小时）：`dedup` 超 24h、`send_queue` 超 7 天或单 peer 超 200 条（裁剪时回推 UI 标失败）；启动时将残留 `sending` 态消息复位为失败（可点重发），杜绝"永远转圈"。
 - 迁移：`PRAGMA user_version` 递增 + 顺序执行迁移脚本；导入/迁移目录前自动备份 db 文件。
@@ -169,6 +170,8 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 
 主界面全局网段刷新（决议 #115）仍属于显式手动扫描：`peers:scan-all-ranges` 在主进程读取当前 `config.scanRanges`，归一化合法 CIDR 后展开并按 IP 去重，再以 8ms 间隔逐个调用 `Discovery.probe()`；进度通过 `net:scan-progress` 推给主窗口，含 `done/total/rangeCount/status`。该扫描不改配置、不入 SQLite、不新增线上协议；运行中重复调用只返回当前进度，避免并发扫描。
 
+媒体撤回（决议 #188）属于 ChatService 与 FilesService 的编排增强，不把规则塞进 IPC 或 `net/` / `store/`：发送图片、普通文件、群文件时，`FilesService` 在创建本地消息前先取得发送端 `msgId`，随后把该 ID 写入每条 `file-ctl offer.msgId`；接收侧收到带 `msgId` 的 offer 后用同一 ID 写 `messages`，并将 `transfer.msg_id` 指向该消息。`ChatService.recall()` 继续是唯一用户撤回入口，先按窗口、发送者、会话和消息类型判断；命中媒体时经 `mediaRecall` 适配器调用 `FilesService.canRecallMessage(msgId)`，由文件服务同时确认对端 `mrec1` 能力、文件 transfer 未完成，以及群文件所有相关 transfer 均未 `done`。真正发出 recall 后，本地先置 `recalled` 并插系统提示；远端收到 recall 后由 `ChatService.applyRecall()` 识别媒体消息，图片直接隐藏，文件则调用 `FilesService.applyRecallMessage(msgId)` 取消未完成 TCP 拉取、清理 `.part`，若 transfer 已 `done` 则忽略迟到撤回并保留已保存文件。群文件复用 `file_ref.transferIds[]` 聚合判断：任一 transfer `done` 即不可撤回；全部未完成才允许整条消息撤回。`msg(kind:"recall")` 早于 offer 到达时继续使用现有 pending recall 机制，offer 之后再按媒体规则应用。旧端没有 `mrec1` 或没有 `offer.msgId` 时仍按旧文件 / 图片流程入库，新端 UI 不展示媒体撤回入口。
+
 私聊文件直接发送（决议 #174）属于本机配置 + 现有传输状态机增强，不新增 SQLite 表或迁移：`config.allowDirectFileSend` 为接收侧总开关，老配置缺省视为 `true`。发送端先走普通 `file:offer`，文件卡片出现后，若该 transfer 为私聊普通文件、对端在线且 `profile.caps` 含 `fd1`，发送方卡片显示「直接发送」按钮；点击后 `file:direct` 调用服务层 `requestDirect(transferId)`，通过 `file-ctl {op:"direct", transferId}` 请求接收端自动 accept。接收端仅在该 transfer 是入站私聊普通文件、状态仍为 `offering` 且本机开关允许时调用 `accept(transferId)`；否则保持普通 `offering` 文件卡片。群聊文件收到 direct 控制帧必须忽略；群文件仍按在线成员逐个普通 offer，收端手动接收。
 
 默认文件接收目录（决议 #179）由服务层统一生成：`accept(transferId)` 未传 `saveDirOverride` 时，以 `getSaveDir()/sanitizeFileName(displayName)` 作为基础目录，displayName 优先本地备注、其次 peer 昵称；私聊直接发送自动接收与普通手动「接收」都走这条逻辑。`file:accept(transferId, true)` 另存为会先由主进程目录选择器得到 `saveDirOverride`，服务层直接使用用户选择目录，不再额外套联系人子目录。若 transfer 是失败重试且 `files.savedPath` 已存在，优先沿用 `dirname(savedPath)`，避免同一传输重试时改变落点。目录不存在时由拉取写盘流程递归创建；重名仍由根级 dedupe 处理，不覆盖既有文件。群聊文件虽然不支持直接发送，但手动接收同样按发送人显示名进入联系人子目录。
@@ -181,7 +184,7 @@ stickers(id TEXT PK, path, w INT, h INT, animated INT, sort INT, added INT)
 - **托盘未读提示**：`ChatService` / `FilesService` 的 `convs` 事件统一汇总未读数后调用 `updateTrayUnread`（决议 #42）。macOS 使用 `Tray.setTitle` + `dock.setBadge` 显示数字；Windows 使用 `BrowserWindow.setOverlayIcon` 叠加 16×16 数字，并让托盘图标在原图与带数字角标图之间闪烁；Linux 调 `app.setBadgeCount` 作为 best effort，同时以托盘闪烁兜底。动态图标由 `tray-badge.ts` 纯 Node PNG 编码生成，不引入图片库或 native 依赖。
 - **图片管线（renderer canvas + 主进程剪贴板读写）**：发送图片 → `createImageBitmap` 解码 → 缩略图（≤280px）即时展示；「添加到表情」→ 静图重采样到 ≤512px → `toBlob('image/webp', 0.8)`；GIF 检测文件头 `GIF8`，≤2MB 原样收藏。聊天图片 / 表情消息右键「复制」复用 `fetchStickerSource(transferId)` 受限读取源文件，渲染层解码后转 `image/png`，经 `clipboard:write-image` IPC 交主进程 `nativeImage` + `clipboard.writeImage` 写系统图片剪贴板并读回校验；输入框粘贴先处理真实文件、文本和浏览器 `ClipboardEvent.items` 图片。主进程 `before-input-event` 的 `clipboard:paste-image` 只负责 Electron 原生图片剪贴板兜底：渲染层收到事件后延迟读取 `clipboard:read-image`，若同一次浏览器 paste 已处理文件 / 文本 / 图片，则取消兜底，避免第三方截图工具同时暴露两路图片时重复发送（决议 #137/#138/#180）。产出 Blob 经 IPC（ArrayBuffer）交主进程落盘。
 - **群聊媒体管线**：不新增群组数据面；`FilesService` 为每个在线群成员创建独立 transfer，offer 携带 `groupId/groupRev`，收端写入群会话并按需索要群元数据。群聊图片仅单图 ≤10MB 时携带 `purpose:"image"`；超过 10MB 自动退化为普通文件 offer，收端显示文件卡片并等待手动接收，避免大群同时拉取造成流量尖峰。发送端消息 `file_ref.transferIds[]` 汇总多个 transfer，文件卡片按完成/失败数量展示整体状态。
-- **文件卡 UI / 状态管线（决议 #174/#176/#177/#178/#179）**：`ChatPane` 的文件 / 文件夹按钮保持普通发送。`FileCard` 在发送方私聊普通文件卡片 `offering` 状态下显示「直接发送」按钮；按钮 enabled 由消息 offer 已送达、peer online、caps `fd1`、非群聊决定。点击后卡片 direct 标记写入 transfer `files` JSON 并推送 transfer 更新；发送侧 `offering` 将「等待接收 / 发送中」作为文件名同行固定状态片，meta 只保留大小 / 文件数 / 速率，右侧只保留一行动作，避免新增直接发送后卡片变高且状态被截断；发送完成统一显示「发送成功」。普通入站文件 `offering` 接收态右侧为一行动作组：`accept` 主按钮、`accept(..., true)` 文件夹图标另存、`decline` 的 `x` 图标拒绝，避免三按钮纵向堆叠撑高卡片；主按钮默认落到 `文件保存位置/联系人名称/`，文件夹图标另存直接落到用户选择目录。接收侧 accepted 显示「接收中」，direct done 只显示「已保存本地」，不展示完整路径或发送人目录名。群聊文件卡永远不显示「直接发送」。
+- **文件卡 UI / 状态管线（决议 #174/#176/#177/#178/#179/#188）**：`ChatPane` 的文件 / 文件夹按钮保持普通发送。`FileCard` 在发送方私聊普通文件卡片 `offering` 状态下显示「直接发送」按钮；按钮 enabled 由消息 offer 已送达、peer online、caps `fd1`、非群聊决定。点击后卡片 direct 标记写入 transfer `files` JSON 并推送 transfer 更新；发送侧 `offering` 将「等待接收 / 发送中」作为文件名同行固定状态片，meta 只保留大小 / 文件数 / 速率，右侧只保留一行动作，避免新增直接发送后卡片变高且状态被截断；发送完成统一显示「发送成功」。普通入站文件 `offering` 接收态右侧为一行动作组：`accept` 主按钮、`accept(..., true)` 文件夹图标另存、`decline` 的 `x` 图标拒绝，避免三按钮纵向堆叠撑高卡片；主按钮默认落到 `文件保存位置/联系人名称/`，文件夹图标另存直接落到用户选择目录。接收侧 accepted 显示「接收中」，direct done 只显示「已保存本地」，不展示完整路径或发送人目录名。群聊文件卡永远不显示「直接发送」。媒体撤回入口由 `ChatPane` 结合 `MessageView.fileRef`、`transfersStore` 和 peer caps 投影到右键菜单：图片显示剩余倒计时；文件仅在相关 transfer 未 `done` 时可用，完成后置灰为「已接收」，群文件任一 transfer `done` 则置灰为「部分已接收」。
 - **状态流**：pinia store 是 main 数据的**只读投影** + 乐观更新（发消息先插 `sending` 态，`msg:status` 事件校正）；窗口重载（开发期热更）时全量拉取重建。会话打开额外携带渲染层滚动意图（restore / latest / target）：会话列表前台切换按 convId 恢复 scrollTop，首次打开/通知托盘/震动直达/回到最新走 latest，历史搜索跳转走 target 交给高亮消息居中；主窗隐藏时清掉本轮滚动缓存，使恢复后重新点开会话默认看最新（决议 #111）。渲染层 `chatStore` 对已加载会话额外维护内存级 `MessageCache`（`Set<msgId>` + `Map<msgId, MessageView>`），用于追加去重、状态事件 O(1) 定位、历史页去重和删除会话后的缓存清理；文件 / 图片 / 表情发送完成后按返回的 `MessageView.convId` 回填，避免发送期间切换会话造成列表错位（决议 #130）。联系人在线计数、单聊 peer 查找、群在线收件人数、群添加成员候选和群发文件卡片传输统计均避免重复数组遍历或临时数组分配，联系人 / 群成员规模上升时仍保持按既有状态投影单次计算（决议 #131）。该状态只在 renderer 内存中存在，不写库、不经 IPC。
 - **PK 渲染状态**：`MessageView.kind` 增加 `pk`，并携带 `pkRef`。`ChatPane` 对他人的 PK 消息始终渲染气泡外侧参与按钮：猜拳为「我也来」，骰子为「掷一下」；自己的 PK 消息不显示按钮。按钮可反复点击，每次都走 `msg:pk` 发送新的独立消息，不建参与状态表、不按回合聚合。按钮 enabled 由当前在线状态决定：单聊对方在线才可点；群聊至少一位其他成员在线才可点，否则灰显并提示「PK 只能和在线的人玩」。动画播放状态只存在组件内存中：新发 / 新收消息播放一次约 1.5s，分页历史直接显示最终结果，`prefers-reduced-motion` 直接跳到结果。骰子用 CSS/SVG 自绘真实点数组合；猜拳使用本地 Twemoji 原色手势资源（缺资源时补 SVG 并同步署名）。工具栏 PK 入口、玩法浮层和参与按钮均复用现有 `PantryIcon` / CSS token，不新增依赖；动效只用 transform / opacity。不引入 GIF、第三方动画库、远程图片或远程字体。
 - **输入提示层级**：渲染层所有 `input/textarea::placeholder` 统一读取 `--text-placeholder`（决议 #38），该 token 低于 `--text-3`，用于占位 hint；真实输入、标签、错误仍使用既有文字 token，避免把提示当内容。
@@ -238,7 +241,7 @@ media/stickers/...  # 自定义表情包媒体
 
 ## 11. 测试策略
 
-- **vitest 单测**（开发机 Node 跑，不依赖 Electron）：codec 编解码与坏报文模糊样本、补发队列裁剪规则、按字分词、文件名清洗、导入身份映射/去重——纯函数全覆盖。私聊直接发送覆盖 codec 用例（合法 `op:"direct"`、缺 transferId 拒绝）与 FilesService 用例（发送侧卡片请求 direct、接收侧收到 direct 自动 accept 到联系人目录、关闭开关或群聊 transfer 忽略 direct）；默认接收目录覆盖手动「接收」落到联系人子目录、另存为不额外套子目录。
+- **vitest 单测**（开发机 Node 跑，不依赖 Electron）：codec 编解码与坏报文模糊样本、补发队列裁剪规则、按字分词、文件名清洗、导入身份映射/去重——纯函数全覆盖。私聊直接发送覆盖 codec 用例（合法 `op:"direct"`、缺 transferId 拒绝）与 FilesService 用例（发送侧卡片请求 direct、接收侧收到 direct 自动 accept 到联系人目录、关闭开关或群聊 transfer 忽略 direct）；默认接收目录覆盖手动「接收」落到联系人子目录、另存为不额外套子目录。媒体撤回需补 codec 用例（`offer.msgId` 白名单 / 非法长度拒绝）、ChatService 用例（图片可撤回、文件 `done` 后不可撤回、群文件部分完成后不可撤回、旧端无 `mrec1` 不展示入口）和 FilesService 用例（撤回进行中传输会 cancel 并清理 `.part`）。
 - **数据库自测**（`npm run test:db`）：esbuild 打包自测脚本后用 `ELECTRON_RUN_AS_NODE=1 electron` 执行——在 **Electron 内置 Node（ABI 110）** 上验证迁移/repo/FTS，与生产运行时完全一致。vitest 跑在开发机新版 Node 上加载不了 Electron ABI 的原生模块，故 DB 层测试必须走这条通道。
 - **协议联调**：两个主进程实例本地回环（127.0.0.1 + 不同端口）跑发现/消息/补发/文件全流程脚本，模拟丢包（随机丢 10% UDP）。
 - **三平台冒烟清单**（人工，发布前必过）：Win7 x64 VM（与生产环境一致）、Debian 10、macOS 26 各过一遍 README 红线场景 + 收发文件 + 截图 + 通知。
@@ -255,6 +258,7 @@ media/stickers/...  # 自定义表情包媒体
 | v0.5 | P1 交付补齐：转发、群内 @、长文本 TCP、截图标注、核心设置、备份包媒体迁移 | services、settings、porter、renderer |
 | v0.27 | 局域网 P2P 自更新（分三步）：①发现与提示（caps `upd1` / 运行形态自检 / `ver` 投影 / 同平台版本比对 / 「内网有新版」提示）②拉包（`update` 可靠请求 / 按请求架构匹配已有本地包并隐藏回传 / nsis 自留包·deb `dpkg-deb` 自重打包 / 拉临时目录 + SHA-256 + 版本核对）③应用更新（nsis 静默装·deb pkexec / 替换重启 / 保留包接力成源）；mac 暂缓 | services/updater、transfer 复用、discovery（caps/ver）、util/self-package·apply-update、提示 UI |
 | v0.28 | 私聊文件直接发送：发送端文件卡片「直接发送」入口、caps `fd1`、`file-ctl {op:"direct"}`、接收端自动 accept；默认文件接收统一到 `文件保存位置/联系人名称/`，另存为除外；群聊文件不支持直接发送 | shared/protocol、net/codec、services/files、settings、renderer FileCard |
+| v0.30 | 媒体撤回：`file-ctl offer.msgId`、caps `mrec1`、图片撤回、未完成文件撤回、群文件全员未完成才可撤回；已接收完成文件不可撤回 | shared/protocol、net/codec、services/chat、services/files、renderer ImageBubble/FileCard |
 | v1.0 | 三平台安装包打磨、冒烟全过、文档定稿 | CI/builder |
 
 ## 13. 变更记录
@@ -356,3 +360,5 @@ media/stickers/...  # 自定义表情包媒体
 - 2026-06-28 v0.95 决议 #185：首次修复 Debian 10 arm64 容器内 Ruby 2.5 安装 fpm 时解析到不兼容新版 ffi 的问题。arm64 CI 先安装 `ffi 1.17.4`，再安装 `fpm 1.9.3`；后续发布日志确认该 ffi 版本仍要求 Ruby 3+，由 #186 继续修正。版本 0.29.3 → 0.29.4。
 - 2026-06-28 v0.96 决议 #186：修复 `ffi 1.17.4` 仍不兼容 Debian 10 Ruby 2.5 的问题。arm64 CI 补 `libffi-dev`，改为安装 `ffi 1.15.5` 后再安装 `fpm 1.9.3`。版本 0.29.4 → 0.29.5。
 - 2026-06-28 v0.97 决议 #187：修复 Debian 10 系统 `mksquashfs` 不支持 AppImage `-offset` 参数的问题。arm64 CI 撤掉 `USE_SYSTEM_MKSQUASHFS=true`，只保留系统 fpm。版本 0.29.5 → 0.29.6。
+- 2026-06-30 v0.98 决议 #188：媒体撤回技术方案实现。新增 caps `mrec1` 与 `file-ctl offer.msgId`；图片 / 文件 / 群文件收发两端共享同一 `messages.id`，撤回仍走 `msg:recall` / `msg(kind:"recall")`。ChatService 负责撤回窗口、发送者和会话判断，FilesService 负责媒体能力、文件 transfer 是否已完成、取消传输和清理 `.part`；不新增 SQLite 表列。版本 0.29.6 → 0.30.0。
+- 2026-06-30 v0.99 决议 #189：修复发送图片贴底与截图后回前台。`chatStore.pushOwn()` 在当前会话成功追加自己发送的消息后触发 `requestConversationScroll('latest')` 并退出历史态；主进程抽出 `showWindowForeground()`，截图窗口关闭 / 发送截图时用短暂 `alwaysOnTop` 把主窗带回前台后释放。版本 0.30.0 → 0.30.1。

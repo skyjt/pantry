@@ -67,6 +67,7 @@ import { setupTray, stopTrayUnreadFlash, updateTrayUnread } from './windows/tray
 import { openSettingsWindow } from './windows/settings-window'
 import { closeCaptureWindow, openCaptureWindow } from './windows/capture-window'
 import { openImageViewerWindow } from './windows/image-viewer-window'
+import { showWindowForeground } from './windows/foreground'
 import {
   incomingNotificationOptions,
   notificationIconPath
@@ -284,22 +285,7 @@ if (!gotLock) {
 
   function showMainWindow(options: { forceForeground?: boolean } = {}): void {
     if (!mainWindow) return
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-    if (options.forceForeground && process.platform === 'win32') {
-      try {
-        const win = mainWindow
-        win.setAlwaysOnTop(true, 'screen-saver')
-        win.focus()
-        const timer = setTimeout(() => {
-          if (!win.isDestroyed()) win.setAlwaysOnTop(false)
-        }, 180)
-        timer.unref?.()
-      } catch {
-        // Windows 前台限制兜底失败不影响消息入库；任务栏闪烁仍会提示用户。
-      }
-    }
+    showWindowForeground(mainWindow, options)
   }
 
   function clearNudgeShake(restore: boolean): void {
@@ -880,6 +866,13 @@ if (!gotLock) {
         isOnline: (peerId) => registry?.get(peerId)?.online === true,
         probe: (peerId) => {
           discovery?.probeNode(peerId) // 打开会话 → 探活（F-DISC-8）
+        },
+        mediaRecall: {
+          canRecall: (row) => files?.canRecallMessage(row.id) ?? false,
+          applyLocalRecall: (row) => {
+            files?.applyRecallMessage(row.id)
+          },
+          applyIncomingRecall: (row) => files?.applyRecallMessage(row.id) ?? false
         }
       })
       const onMessage = (msg: MessageView): void => {
@@ -1034,17 +1027,17 @@ if (!gotLock) {
         sources.find((s) => s.display_id === String(display.id)) ?? sources[0] ?? null
       if (!source || source.thumbnail.isEmpty()) {
         capturing = false
-        if (hide && wasVisible) showMainWindow()
+        if (wasVisible) showMainWindow({ forceForeground: true })
         return
       }
       openCaptureWindow(display.bounds, source.thumbnail.toDataURL(), display.scaleFactor, () => {
         capturing = false
-        if (hide && wasVisible) showMainWindow()
+        if (wasVisible) showMainWindow({ forceForeground: true })
       })
     } catch (err) {
       console.warn('[capture] 抓屏失败（macOS 需授予屏幕录制权限）：', err)
       capturing = false
-      if (hide && wasVisible) showMainWindow()
+      if (wasVisible) showMainWindow({ forceForeground: true })
     }
   }
 
@@ -1853,7 +1846,7 @@ if (!gotLock) {
     if (bytes.byteLength > 30 * 1024 * 1024) return
     if (!writeClipboardImage(bytes)) return // 始终进剪贴板（随处可贴）
     if (send === true && mainWindow) {
-      showMainWindow()
+      showMainWindow({ forceForeground: true })
       mainWindow.webContents.send(IpcEvents.captured, bytes)
     }
   })
@@ -1984,6 +1977,7 @@ if (!gotLock) {
   app.whenReady().then(() => {
     const updateCaps = canAdvertiseUpdateSource() ? [CAPS.updateSource] : []
     appState = loadAppState(app.getPath('userData'), app.getVersion(), tcpPort, udpPort, [
+      CAPS.mediaRecall,
       CAPS.fileDirect,
       ...updateCaps
     ])

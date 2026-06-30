@@ -204,6 +204,7 @@ function validatePayload(type: string, payload: unknown, textLimit = TEXT_UDP_LI
       }
       if (f.op !== 'offer') return false
       const o = f as Partial<FileCtlOffer>
+      if (o.msgId !== undefined && !isStr(o.msgId, LIMITS.id)) return false
       if (!isInt(o.seq) || !isInt(o.total) || o.seq! < 1 || o.total! < 1 || o.seq! > o.total!)
         return false
       if (o.total! > Math.ceil(MAX_FILES_PER_TRANSFER / OFFER_FILES_PER_PACKET)) return false

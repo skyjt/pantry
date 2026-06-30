@@ -23,10 +23,12 @@ import type {
   ConversationSearchKind,
   MessageView,
   PeerView,
-  SettingsView
+  SettingsView,
+  TransferView
 } from '../../../shared/ipc'
 import type { PkGame } from '../../../shared/pk'
 import {
+  CAPS,
   NUDGE_MIN_INTERVAL_MS,
   RECALL_WINDOW_MS,
   TEXT_TCP_LIMIT,
@@ -304,6 +306,8 @@ function onDocumentPointerDown(event: MouseEvent): void {
 
 onMounted(async () => {
   document.addEventListener('mousedown', onDocumentPointerDown)
+  nowTs.value = Date.now()
+  recallCountdownTimer = setInterval(() => (nowTs.value = Date.now()), 500)
   refreshInputFont()
   // 空白字形字体就绪前测得的是系统字符宽——就绪后清缓存重测，镜像槽宽收敛到 1.3em
   void document.fonts
@@ -345,7 +349,10 @@ onUnmounted(() => {
   if (peerProfileSavedTimer) clearTimeout(peerProfileSavedTimer)
   if (nudgeFeedbackTimer) clearTimeout(nudgeFeedbackTimer)
   if (nudgeRetryTimer) clearInterval(nudgeRetryTimer)
-  if (recallCountdownTimer) clearInterval(recallCountdownTimer)
+  if (recallCountdownTimer) {
+    clearInterval(recallCountdownTimer)
+    recallCountdownTimer = null
+  }
   if (clipboardImageFallbackTimer) clearTimeout(clipboardImageFallbackTimer)
   historySearchRun += 1
   stopSettings?.()
@@ -1003,45 +1010,86 @@ function canCopyMessage(msg: MessageView): boolean {
   return msg.kind === 'text' && msg.status !== 'recalled'
 }
 
+function isRecallableMediaKind(msg: MessageView): boolean {
+  return msg.kind === 'image' || msg.kind === 'file'
+}
+
+function messageTransferIds(msg: MessageView): string[] {
+  const ref = msg.fileRef
+  if (!ref) return []
+  return ref.transferIds && ref.transferIds.length > 0 ? ref.transferIds : [ref.transferId]
+}
+
+function messageTransfers(msg: MessageView): TransferView[] {
+  return messageTransferIds(msg)
+    .map((id) => transfersStore.byId[id])
+    .filter((item): item is TransferView => !!item)
+}
+
+function peerSupportsMediaRecall(peerId: string): boolean {
+  return (peersStore.byId(peerId)?.caps ?? []).includes(CAPS.mediaRecall)
+}
+
+function mediaPeersSupportRecall(msg: MessageView): boolean {
+  const transfers = messageTransfers(msg)
+  if (transfers.length > 0) {
+    return transfers.every((transfer) => peerSupportsMediaRecall(transfer.peerId))
+  }
+  if (msg.convId.startsWith('single:')) return peerSupportsMediaRecall(msg.convId.slice(7))
+  return false
+}
+
+function mediaRecallDisabledReason(msg: MessageView): string {
+  if (!isRecallableMediaKind(msg)) return ''
+  if (!mediaPeersSupportRecall(msg)) return '不可用'
+  if (msg.kind !== 'file') return ''
+  const transfers = messageTransfers(msg)
+  if (transfers.length === 0) return '不可用'
+  if (transfers.some((transfer) => transfer.status === 'done')) {
+    return msg.convId.startsWith('group:') ? '部分已接收' : '已接收'
+  }
+  return ''
+}
+
 function canRecallMessage(msg: MessageView): boolean {
-  if (!msg.isMine || (msg.kind !== 'text' && msg.kind !== 'pk') || msg.status === 'recalled') return false
-  return Date.now() - msg.ts <= RECALL_WINDOW_MS
+  if (!isRecallableKind(msg)) return false
+  if (nowTs.value - msg.ts > RECALL_WINDOW_MS) return false
+  return mediaRecallDisabledReason(msg) === ''
 }
 
 /** 撤回项是否出现在右键菜单（不含时间判断）：超时也显示，变灰提示"超时"（决议 #63） */
 function isRecallableKind(msg: MessageView): boolean {
-  return msg.isMine && (msg.kind === 'text' || msg.kind === 'pk') && msg.status !== 'recalled'
+  return (
+    msg.isMine &&
+    (msg.kind === 'text' || msg.kind === 'pk' || isRecallableMediaKind(msg)) &&
+    msg.status !== 'recalled'
+  )
 }
 
-// 撤回倒计时（决议 #63）：菜单打开时每 500ms 刷新 nowTs，驱动"撤回（mm:ss）"实时递减
+// 撤回倒计时时间源（决议 #63/#188）：驱动通用菜单与图片菜单的"撤回（mm:ss）"实时递减
 const nowTs = ref(Date.now())
 let recallCountdownTimer: ReturnType<typeof setInterval> | null = null
-const recallRemainingMs = computed(() => {
-  const msg = msgMenu.value?.msg
-  if (!msg) return 0
+function recallRemainingFor(msg: MessageView): number {
   return Math.max(0, RECALL_WINDOW_MS - (nowTs.value - msg.ts))
-})
-const recallExpired = computed(() => recallRemainingMs.value <= 0)
-const recallButtonLabel = computed(() => {
-  if (recallExpired.value) return '撤回（超时）'
-  const totalSec = Math.ceil(recallRemainingMs.value / 1000)
+}
+function recallButtonLabelFor(msg: MessageView): string {
+  const reason = mediaRecallDisabledReason(msg)
+  if (reason) return `撤回（${reason}）`
+  const remaining = recallRemainingFor(msg)
+  if (remaining <= 0) return '撤回（超时）'
+  const totalSec = Math.ceil(remaining / 1000)
   const mm = String(Math.floor(totalSec / 60)).padStart(2, '0')
   const ss = String(totalSec % 60).padStart(2, '0')
   return `撤回（${mm}:${ss}）`
+}
+const recallButtonLabel = computed(() => {
+  const msg = msgMenu.value?.msg
+  return msg ? recallButtonLabelFor(msg) : '撤回'
 })
-watch(
-  () => msgMenu.value?.msg.id,
-  (id) => {
-    if (recallCountdownTimer) {
-      clearInterval(recallCountdownTimer)
-      recallCountdownTimer = null
-    }
-    if (id) {
-      nowTs.value = Date.now()
-      recallCountdownTimer = setInterval(() => (nowTs.value = Date.now()), 500)
-    }
-  }
-)
+const recallButtonDisabled = computed(() => {
+  const msg = msgMenu.value?.msg
+  return !msg || !canRecallMessage(msg)
+})
 
 function canForwardMessage(msg: MessageView): boolean {
   return msg.status !== 'recalled' && msg.kind !== 'system' && msg.kind !== 'pk'
@@ -1092,8 +1140,12 @@ async function copySelectedMessage(): Promise<void> {
 
 async function recallSelectedMessage(): Promise<void> {
   const msg = msgMenu.value?.msg
+  if (msg) await recallMessage(msg)
+}
+
+async function recallMessage(msg: MessageView): Promise<void> {
   msgMenu.value = null
-  if (!msg || !canRecallMessage(msg)) return
+  if (!canRecallMessage(msg)) return
   await chatStore.recall(msg.id)
 }
 
@@ -1503,7 +1555,11 @@ async function onDrop(event: DragEvent): Promise<void> {
               v-else-if="msg.kind === 'image' || msg.kind === 'sticker'"
               :msg="msg"
               class="message-surface"
+              :recall-visible="isRecallableKind(msg)"
+              :recall-disabled="!canRecallMessage(msg)"
+              :recall-label="recallButtonLabelFor(msg)"
               @forward="forwardMsg = msg"
+              @recall="recallMessage(msg)"
             />
             <PkBubble
               v-else-if="msg.kind === 'pk'"
@@ -1588,7 +1644,7 @@ async function onDrop(event: DragEvent): Promise<void> {
       <button
         v-if="isRecallableKind(msgMenu.msg)"
         class="danger"
-        :disabled="recallExpired"
+        :disabled="recallButtonDisabled"
         @click="recallSelectedMessage"
       >
         {{ recallButtonLabel }}

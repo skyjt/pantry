@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { MSG_TYPES, type Envelope, type FileCtlPayload, type GroupMeta } from '../../shared/protocol'
+import {
+  CAPS,
+  MSG_TYPES,
+  type Envelope,
+  type FileCtlPayload,
+  type GroupMeta
+} from '../../shared/protocol'
 import type { ConversationView } from '../../shared/ipc'
 import type { Messenger } from '../net/messenger'
 import type { PeerRegistry } from '../net/peer-registry'
@@ -290,7 +296,7 @@ describe('FilesService 群聊媒体', () => {
     new FilesService({
       selfId: 'node-self',
       messenger: messenger as unknown as Messenger,
-      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      registry: new FakeRegistry(['node-bob'], [CAPS.mediaRecall]) as unknown as PeerRegistry,
       convRepo: new FakeConvRepo() as unknown as ConvRepo,
       msgRepo: msgRepo as unknown as MsgRepo,
       transferRepo: transferRepo as unknown as TransferRepo,
@@ -405,7 +411,7 @@ describe('FilesService 群聊媒体', () => {
     const service = new FilesService({
       selfId: 'node-self',
       messenger: messenger as unknown as Messenger,
-      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      registry: new FakeRegistry(['node-bob'], [CAPS.mediaRecall]) as unknown as PeerRegistry,
       convRepo: new FakeConvRepo() as unknown as ConvRepo,
       msgRepo: msgRepo as unknown as MsgRepo,
       transferRepo: transferRepo as unknown as TransferRepo,
@@ -542,6 +548,139 @@ describe('FilesService 默认接收目录', () => {
 })
 
 describe('FilesService 私聊直接发送', () => {
+  it('发送聊天媒体 offer 时携带本端消息 ID，供对端复用撤回锚点', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-media-msgid-send-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, '图片.png')
+    writeFileSync(filePath, 'image')
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    const view = await service.offerPaths('node-bob', [filePath], 'image')
+    await waitTick()
+
+    expect(view?.kind).toBe('image')
+    expect(messenger.sent[0].env.payload).toMatchObject({
+      op: 'offer',
+      msgId: view!.id,
+      purpose: 'image'
+    })
+  })
+
+  it('接收带 msgId 的文件 offer 时用该 ID 入库并关联 transfer', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-media-msgid-recv-'))
+    tmpDirs.push(dir)
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    messenger.emit(
+      'incoming',
+      makeEnvelope<FileCtlPayload>(MSG_TYPES.fileCtl, 'node-bob', {
+        op: 'offer',
+        transferId: 't-shared-msg',
+        msgId: 'msg-shared-media',
+        seq: 1,
+        total: 1,
+        files: [{ fileId: 'f-1', path: '资料.txt', size: 5 }],
+        totalSize: 5,
+        fileCount: 1,
+        rootName: '资料.txt'
+      } as FileCtlPayload)
+    )
+    await waitTick()
+
+    expect(msgRepo.get('msg-shared-media')).toMatchObject({
+      id: 'msg-shared-media',
+      kind: 'file',
+      conv_id: 'single:node-bob'
+    })
+    expect(transferRepo.get('t-shared-msg')?.msg_id).toBe('msg-shared-media')
+  })
+
+  it('文件只在关联 transfer 未完成时允许撤回', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-media-recall-state-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, '资料.txt')
+    writeFileSync(filePath, 'hello')
+
+    const messenger = new FakeMessenger()
+    const msgRepo = new FakeMsgRepo()
+    const transferRepo = new FakeTransferRepo()
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: messenger as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob'], [CAPS.mediaRecall]) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: msgRepo as unknown as MsgRepo,
+      transferRepo: transferRepo as unknown as TransferRepo,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    const view = await service.offerPaths('node-bob', [filePath])
+    const transferId = view!.fileRef!.transferId
+    const mediaRecall = service as unknown as { canRecallMessage(msgId: string): boolean }
+
+    expect(mediaRecall.canRecallMessage(view!.id)).toBe(true)
+    transferRepo.updateStatus(transferId, 'done')
+    expect(mediaRecall.canRecallMessage(view!.id)).toBe(false)
+  })
+
+  it('旧端未声明媒体撤回能力时不允许撤回聊天媒体', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pantry-media-recall-cap-'))
+    tmpDirs.push(dir)
+    const filePath = join(dir, '资料.txt')
+    writeFileSync(filePath, 'hello')
+
+    const service = new FilesService({
+      selfId: 'node-self',
+      messenger: new FakeMessenger() as unknown as Messenger,
+      registry: new FakeRegistry(['node-bob']) as unknown as PeerRegistry,
+      convRepo: new FakeConvRepo() as unknown as ConvRepo,
+      msgRepo: new FakeMsgRepo() as unknown as MsgRepo,
+      transferRepo: new FakeTransferRepo() as unknown as TransferRepo,
+      tcpPort: 0,
+      getSaveDir: () => dir,
+      getImagesDir: () => dir,
+      bindAddress: '127.0.0.1'
+    })
+
+    const view = await service.offerPaths('node-bob', [filePath])
+    const mediaRecall = service as unknown as { canRecallMessage(msgId: string): boolean }
+
+    expect(mediaRecall.canRecallMessage(view!.id)).toBe(false)
+  })
+
   it('发送侧在已有文件卡片上请求直接发送', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pantry-direct-send-'))
     tmpDirs.push(dir)
@@ -554,7 +693,7 @@ describe('FilesService 私聊直接发送', () => {
     const service = new FilesService({
       selfId: 'node-self',
       messenger: messenger as unknown as Messenger,
-      registry: new FakeRegistry(['node-bob'], ['fd1']) as unknown as PeerRegistry,
+      registry: new FakeRegistry(['node-bob'], [CAPS.fileDirect]) as unknown as PeerRegistry,
       convRepo: new FakeConvRepo() as unknown as ConvRepo,
       msgRepo: msgRepo as unknown as MsgRepo,
       transferRepo: transferRepo as unknown as TransferRepo,
